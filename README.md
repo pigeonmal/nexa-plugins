@@ -9,7 +9,7 @@ sources for pure plugins, and direct Swift / Kotlin / C++ implementations. No
 runtime shims, no reflection, no service locators — the same rules the compiler
 enforces for the core framework.
 
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL--2.0-blue.svg)](LICENSE)
+[![License: MPL 2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 
 ## Available plugins
 

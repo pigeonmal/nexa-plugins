@@ -130,8 +130,8 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     }
 
     public func getObject<T>(_ key: String, _ decode: (NexaValueReader) -> T?) -> T? {
-        guard let data = getBuffer(key), let reader = NexaValueReader(data) else { return nil }
-        return decode(reader)
+        guard let data = getBuffer(key) else { return nil }
+        return decode(NexaValueReader(data))
     }
 
     public func setList<T>(_ key: String, _ values: [T], _ encode: ([T], NexaValueWriter) -> Void) -> Bool {
@@ -141,8 +141,8 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     }
 
     public func getList<T>(_ key: String, _ decode: (NexaValueReader) -> [T]?) -> [T]? {
-        guard let data = getBuffer(key), let reader = NexaValueReader(data) else { return nil }
-        return decode(reader)
+        guard let data = getBuffer(key) else { return nil }
+        return decode(NexaValueReader(data))
     }
 
     public func setSet<T>(_ key: String, _ values: Set<T>, _ encode: (Set<T>, NexaValueWriter) -> Void) -> Bool {
@@ -152,8 +152,8 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     }
 
     public func getSet<T>(_ key: String, _ decode: (NexaValueReader) -> Set<T>?) -> Set<T>? {
-        guard let data = getBuffer(key), let reader = NexaValueReader(data) else { return nil }
-        return decode(reader)
+        guard let data = getBuffer(key) else { return nil }
+        return decode(NexaValueReader(data))
     }
 
     public func setMap<K, V>(_ key: String, _ values: [K: V], _ encode: ([K: V], NexaValueWriter) -> Void) -> Bool {
@@ -163,8 +163,8 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     }
 
     public func getMap<K, V>(_ key: String, _ decode: (NexaValueReader) -> [K: V]?) -> [K: V]? {
-        guard let data = getBuffer(key), let reader = NexaValueReader(data) else { return nil }
-        return decode(reader)
+        guard let data = getBuffer(key) else { return nil }
+        return decode(NexaValueReader(data))
     }
 
     // MARK: - Key space

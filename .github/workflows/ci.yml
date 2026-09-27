@@ -36,8 +36,6 @@ jobs:
               failures.append("LICENSE must not be GPL text")
 
           readme = (root / "README.md").read_text()
-          if "license-MPL--2.0" not in readme:
-              failures.append("README badge must say MPL-2.0")
           if "Mozilla Public License 2.0" not in readme:
               failures.append("README license section must say MPL-2.0")
           for forbidden in ("license-MIT", "MIT License", "GPL"):

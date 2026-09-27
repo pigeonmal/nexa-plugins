@@ -25,12 +25,15 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     override val version: String
     override val pageSize: Long
 
+    @Volatile
     override var onValueChanged: ((String) -> Unit)? = null
+    @Volatile
     override var onContentChanged: (() -> Unit)? = null
 
     private val cryptKey: String?
     private val store: MMKV?
-    private val observedKeys: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    @Volatile
+    private var observedKeys: MutableSet<String>? = null
     private var isDisposed = false
 
     public constructor(instanceID: String, cryptKey: String?, multiProcess: Boolean) {
@@ -39,10 +42,8 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         this.isMultiProcess = multiProcess
         this.isEncrypted = this.cryptKey != null
 
-        // MMKV is initialized once per process, and the handler that reports
-        // writes from other processes and maps its own log has to be in place
-        // before the first store is mapped.
-        MMKV.registerHandler(MMKVStoreObserver)
+        // MMKV.initialize loads its native library. Registering the handler
+        // first calls a JNI method before that library is loaded.
         val rootDir = MMKV.initialize(NexaRuntimeCore.context().applicationContext)
         this.rootDirectory = rootDir
         this.version = MMKV.version()
@@ -60,7 +61,12 @@ public class MMKVStoreImpl : MMKVStoreSpec {
             // taking the process down; every operation below reports failure.
             null
         }
-        MMKVStoreObserver.register(this)
+        if (multiProcess) {
+            // Outer-process callbacks only apply to stores using MMKV's shared
+            // process mode. Keep ordinary single-process stores out of the
+            // process-wide observer registry.
+            MMKVStoreObserver.register(this)
+        }
     }
 
     // MARK: - Scalars
@@ -265,6 +271,21 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         store?.async()
     }
 
+    override fun enableCompareBeforeSet(): Boolean {
+        val store = store ?: return false
+        if (isEncrypted) {
+            return false
+        }
+        store.enableCompareBeforeSet()
+        return store.isCompareBeforeSetEnabled
+    }
+
+    override fun disableCompareBeforeSet(): Boolean {
+        val store = store ?: return false
+        store.disableCompareBeforeSet()
+        return !store.isCompareBeforeSetEnabled
+    }
+
     override fun rekey(cryptKey: String?): Boolean =
         store?.reKey(cryptKey) ?: false
 
@@ -283,15 +304,15 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     // MARK: - Change listeners
 
     override fun observe(key: String) {
-        observedKeys.add(key)
+        observedKeySet(create = true)?.add(key)
     }
 
     override fun unobserve(key: String) {
-        observedKeys.remove(key)
+        observedKeySet(create = false)?.remove(key)
     }
 
     override fun unobserveAll() {
-        observedKeys.clear()
+        observedKeySet(create = false)?.clear()
     }
 
     override fun dispose() {
@@ -299,10 +320,12 @@ public class MMKVStoreImpl : MMKVStoreSpec {
             return
         }
         isDisposed = true
-        MMKVStoreObserver.unregister(this)
+        if (isMultiProcess) {
+            MMKVStoreObserver.unregister(this)
+        }
         onValueChanged = null
         onContentChanged = null
-        observedKeys.clear()
+        observedKeySet(create = false)?.clear()
         store?.close()
     }
 
@@ -327,15 +350,32 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     private fun allKeys(): List<String> =
         store?.allKeys()?.filterIsInstance<String>()?.sorted() ?: emptyList()
 
+    /** Avoid allocating a concurrent set for stores that never observe keys. */
+    private fun observedKeySet(create: Boolean): MutableSet<String>? {
+        observedKeys?.let { return it }
+        if (!create) {
+            return null
+        }
+        return synchronized(this) {
+            observedKeys ?: java.util.concurrent.ConcurrentHashMap.newKeySet<String>().also {
+                observedKeys = it
+            }
+        }
+    }
+
     private fun notify(key: String) {
-        if (!observedKeys.contains(key)) {
+        // Most stores never install a listener. Avoid hashing every written
+        // key in the concurrent set on that hot path.
+        val callback = onValueChanged ?: return
+        if (observedKeySet(create = false)?.contains(key) != true) {
             return
         }
-        onValueChanged?.invoke(key)
+        callback.invoke(key)
     }
 
     private fun notifyObservedKeys() {
-        observedKeys.sorted().forEach { key -> onValueChanged?.invoke(key) }
+        val callback = onValueChanged ?: return
+        observedKeySet(create = false)?.sorted()?.forEach { key -> callback.invoke(key) }
     }
 
     /**
@@ -344,7 +384,7 @@ public class MMKVStoreImpl : MMKVStoreSpec {
      * store is reported.
      */
     internal fun reportOuterProcessChange() {
-        if (observedKeys.isEmpty()) {
+        if (observedKeySet(create = false)?.isNotEmpty() != true) {
             return
         }
         notifyObservedKeys()
@@ -359,8 +399,16 @@ public class MMKVStoreImpl : MMKVStoreSpec {
  */
 internal object MMKVStoreObserver : MMKVHandler {
     private val stores = ConcurrentHashMap<String, MMKVStoreImpl>()
+    private var handlerRegistered = false
 
+    @Synchronized
     fun register(store: MMKVStoreImpl) {
+        if (!handlerRegistered) {
+            // Install after MMKV.initialize has loaded the native library and
+            // before the first multi-process store is opened.
+            MMKV.registerHandler(this)
+            handlerRegistered = true
+        }
         stores[store.instanceID] = store
     }
 

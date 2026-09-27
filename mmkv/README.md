@@ -65,6 +65,13 @@ version field alongside the change.
 `cryptKey` for AES encryption, and `multiProcess = true` when another process
 writes the same file. Both must match the values the store was created with.
 
+For workloads that often write an unchanged value, `enableCompareBeforeSet()`
+asks MMKV to compare the new value with the stored value and skip redundant
+appends. It returns `false` if MMKV cannot enable the option. This optimization
+is incompatible with encryption and key expiration; leave it disabled when
+values usually change, since comparing adds work to those writes. Call
+`disableCompareBeforeSet()` to turn it off again.
+
 `rekey` re-encrypts an existing store with a new key, or removes encryption
 when the key is `null`. MMKV uses up to 16 bytes of the key for AES-128 and up
 to 32 for AES-256, and does not validate the length.

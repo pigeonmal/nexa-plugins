@@ -117,6 +117,11 @@ native class MMKVStore {
     fn sync()
     /// Queues a flush on MMKV's own writer thread.
     fn asyncFlush()
+    /// Skips a write when the new value is byte-for-byte equal to the current
+    /// value. MMKV does not support this with encryption or key expiration.
+    fn enableCompareBeforeSet() -> Bool
+    /// Disables MMKV's compare-before-set optimization.
+    fn disableCompareBeforeSet() -> Bool
     /// Re-encrypts the store with a new key, or removes encryption when the
     /// key is `null`. MMKV does not validate key length: AES-128 uses up to
     /// 16 bytes and AES-256 up to 32.

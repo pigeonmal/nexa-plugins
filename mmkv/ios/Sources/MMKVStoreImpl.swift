@@ -40,7 +40,9 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
             aes256: false,
             mode: self.mode
         )
-        MMKVStoreObserver.shared.register(self)
+        if multiProcess {
+            MMKVStoreObserver.shared.register(self)
+        }
     }
 
     // MARK: - Scalars
@@ -265,6 +267,16 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
         store?.async()
     }
 
+    public func enableCompareBeforeSet() -> Bool {
+        guard !isEncrypted, let store else { return false }
+        return store.enableCompareBeforeSet()
+    }
+
+    public func disableCompareBeforeSet() -> Bool {
+        guard let store else { return false }
+        return store.disableCompareBeforeSet()
+    }
+
     public func rekey(_ cryptKey: String?) -> Bool {
         guard let store else { return false }
         return store.reset(cryptKey: cryptKey.map { Data($0.utf8) })
@@ -307,7 +319,9 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     public func dispose() {
         guard !isDisposed else { return }
         isDisposed = true
-        MMKVStoreObserver.shared.unregister(self)
+        if isMultiProcess {
+            MMKVStoreObserver.shared.unregister(self)
+        }
         onValueChanged = nil
         onContentChanged = nil
         observedKeys.removeAll()

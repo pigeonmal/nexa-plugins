@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+.nexa/
+DerivedData/
+build/
+node_modules/
+*.xcuserstate
+xcuserdata/

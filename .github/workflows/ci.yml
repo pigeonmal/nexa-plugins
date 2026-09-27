@@ -1,0 +1,81 @@
+name: Nexa Plugins CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  license-metadata:
+    name: License metadata consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check license metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          from pathlib import Path
+
+          root = Path(".")
+          failures = []
+
+          license_text = (root / "LICENSE").read_text()
+          if "Mozilla Public License Version 2.0" not in license_text:
+              failures.append("LICENSE must be MPL-2.0")
+          if "GENERAL PUBLIC LICENSE" in license_text:
+              failures.append("LICENSE must not be GPL text")
+
+          readme = (root / "README.md").read_text()
+          if "license-MPL--2.0" not in readme:
+              failures.append("README badge must say MPL-2.0")
+          if "Mozilla Public License 2.0" not in readme:
+              failures.append("README license section must say MPL-2.0")
+          for forbidden in ("license-MIT", "MIT License", "GPL"):
+              if forbidden in readme:
+                  failures.append(f"README must not claim {forbidden}")
+
+          if failures:
+              print("\n".join(failures))
+              sys.exit(1)
+          print("license metadata consistent (MPL-2.0)")
+          EOF
+
+  plugin-check:
+    name: Plugin manifest and contract check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the Nexa CLI
+        run: |
+          git clone --depth 1 https://github.com/pigeonmal/nexa.git "$RUNNER_TEMP/nexa"
+          cargo build --manifest-path "$RUNNER_TEMP/nexa/Cargo.toml" -p nexa-cli --locked
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp "$RUNNER_TEMP/nexa/target/debug/nexa" "$RUNNER_TEMP/bin/nexa"
+      - name: Check every plugin package
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          shopt -s nullglob
+          manifests=(*/plugin.config.nx)
+          if [ ${#manifests[@]} -eq 0 ]; then
+            echo "no plugin packages found"
+            exit 0
+          fi
+          for manifest in "${manifests[@]}"; do
+            package="$(dirname "$manifest")"
+            echo "::group::$package"
+            nexa plugin check "$package"
+            echo "::endgroup::"
+          done

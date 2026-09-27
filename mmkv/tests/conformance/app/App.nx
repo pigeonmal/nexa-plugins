@@ -19,6 +19,22 @@ struct Chapter {
     seconds: Int64,
 }
 
+struct BenchmarkObject {
+    id: Int32,
+    generation: Int32,
+    payload: String,
+}
+
+struct BenchmarkStringEntry {
+    key: String,
+    value: String,
+}
+
+struct BenchmarkIntEntry {
+    key: String,
+    value: Int32,
+}
+
 app MmkvConformance {
     enum PlaybackState {
         idle,
@@ -31,6 +47,23 @@ app MmkvConformance {
     }
 
     let store = MMKV.MMKVStore("conformance", "conformance-key", true)
+
+    state benchmarkGeneration: Int32 = 0
+    state benchmarkStartedAt: Int64 = 0
+    state benchmarkObjects: Array<BenchmarkObject> = []
+    state stringReadKeys: Array<String> = []
+    state stringWriteEntries: Array<BenchmarkStringEntry> = []
+    state intReadKeys: Array<String> = []
+    state intWriteEntries: Array<BenchmarkIntEntry> = []
+    state listReadKeys: Array<String> = []
+    state listWriteKeys: Array<String> = []
+    state selectedTab: Int32 = 0
+    state stringReadNs: Int64 = 0
+    state stringWriteNs: Int64 = 0
+    state intReadNs: Int64 = 0
+    state intWriteNs: Int64 = 0
+    state listReadNs: Int64 = 0
+    state listWriteNs: Int64 = 0
 
     state launches: Int32 = 0
     state ratio: Float64 = 0
@@ -48,67 +81,157 @@ app MmkvConformance {
     state pageSize: Int64 = 0
 
     body {
-        Column(spacing: 12) {
-            Button("Scalars") {
-                store.setBool("enabled", true)
-                store.setInt32("launches", 7)
-                store.setInt64("big", 9000000000)
-                store.setUInt32("count", 12)
-                store.setUInt64("size", 1000)
-                store.setFloat32("ratio32", 0.5)
-                store.setFloat64("ratio", 0.5)
-                store.setString("name", "nexa")
-                store.setBuffer("raw", Bytes.fromText(text: "payload"))
+        AppBottomBar(selected: selectedTab) {
+            Tab(index: 0, label: "Benchmark", icon: "speedometer") {
+                Column(spacing: 12) {
+                    Text("MMKV benchmark — total nanoseconds")
+                    Text("Setup and warm-up are excluded; reads include object decoding.")
 
-                enabled = store.getBool("enabled") ?? false
-                launches = store.getInt32("launches") ?? 0
-                name = store.getString("name") ?? ""
-                raw = store.getBuffer("raw")
-                ratio = store.getFloat64("ratio") ?? 0
+                    Button("Benchmark strings (1,000)") {
+                        benchmarkGeneration = benchmarkGeneration + 1
+                        stringReadKeys = []
+                        stringWriteEntries = []
+                        for index in 0..<1000 {
+                            stringReadKeys.append("bench-string-read-$index")
+                            store.setString("bench-string-read-$index", "seed-$index")
+                            stringWriteEntries.append(BenchmarkStringEntry(
+                                "bench-string-write-$index",
+                                "value-$benchmarkGeneration-$index"
+                            ))
+                        }
+                        for index in 0..<10 {
+                            store.getString(stringReadKeys[index])
+                            store.setString("bench-string-warm-$index", "warm-$benchmarkGeneration")
+                        }
+
+                        benchmarkStartedAt = Time.monotonic()
+                        for key in stringReadKeys {
+                            store.getString(key)
+                        }
+                        stringReadNs = Time.elapsed(since: benchmarkStartedAt)
+
+                        benchmarkStartedAt = Time.monotonic()
+                        for entry in stringWriteEntries {
+                            store.setString(entry.key, entry.value)
+                        }
+                        stringWriteNs = Time.elapsed(since: benchmarkStartedAt)
+                        Log.info(message: "MMKV string read: $stringReadNs ns; write: $stringWriteNs ns")
+                    }
+                    Text("String read: $stringReadNs ns; write: $stringWriteNs ns")
+
+                    Button("Benchmark Int32 (1,000)") {
+                        benchmarkGeneration = benchmarkGeneration + 1
+                        intReadKeys = []
+                        intWriteEntries = []
+                        for index in 0..<1000 {
+                            intReadKeys.append("bench-int-read-$index")
+                            store.setInt32("bench-int-read-$index", index)
+                            intWriteEntries.append(BenchmarkIntEntry(
+                                "bench-int-write-$index",
+                                benchmarkGeneration + index
+                            ))
+                        }
+                        for index in 0..<10 {
+                            store.getInt32(intReadKeys[index])
+                            store.setInt32("bench-int-warm-$index", benchmarkGeneration + index)
+                        }
+
+                        benchmarkStartedAt = Time.monotonic()
+                        for key in intReadKeys {
+                            store.getInt32(key)
+                        }
+                        intReadNs = Time.elapsed(since: benchmarkStartedAt)
+
+                        benchmarkStartedAt = Time.monotonic()
+                        for entry in intWriteEntries {
+                            store.setInt32(entry.key, entry.value)
+                        }
+                        intWriteNs = Time.elapsed(since: benchmarkStartedAt)
+                        Log.info(message: "MMKV Int32 read: $intReadNs ns; write: $intWriteNs ns")
+                    }
+                    Text("Int32 read: $intReadNs ns; write: $intWriteNs ns")
+
+                    Button("Benchmark 500-object lists (1,000)") {
+                        benchmarkGeneration = benchmarkGeneration + 1
+                        benchmarkObjects = []
+                        for index in 0..<500 {
+                            benchmarkObjects.append(BenchmarkObject(index, benchmarkGeneration, "object-$index"))
+                        }
+                        listReadKeys = []
+                        listWriteKeys = []
+                        for index in 0..<1000 {
+                            listReadKeys.append("bench-list-read-$index")
+                            listWriteKeys.append("bench-list-write-$index")
+                            store.setList<BenchmarkObject>("bench-list-read-$index", benchmarkObjects)
+                        }
+                        for index in 0..<3 {
+                            store.getList<BenchmarkObject>(listReadKeys[index])
+                            store.setList<BenchmarkObject>("bench-list-warm-$index", benchmarkObjects)
+                        }
+
+                        benchmarkStartedAt = Time.monotonic()
+                        for key in listReadKeys {
+                            store.getList<BenchmarkObject>(key)
+                        }
+                        listReadNs = Time.elapsed(since: benchmarkStartedAt)
+
+                        benchmarkStartedAt = Time.monotonic()
+                        for key in listWriteKeys {
+                            store.setList<BenchmarkObject>(key, benchmarkObjects)
+                        }
+                        listWriteNs = Time.elapsed(since: benchmarkStartedAt)
+                        Log.info(message: "MMKV 500-object list read: $listReadNs ns; write: $listWriteNs ns")
+                    }
+                    Text("500-object list read: $listReadNs ns; write: $listWriteNs ns")
+                }
             }
 
-            Button("Generics") {
-                store.setObject("options", PlayerOptions(true, 0.5, PlaybackState.playing, ["a"]))
-                store.setObject("ratio", 0.75)
-                store.setList<Int32>("launches-list", [1, 2, 3])
-                store.setSet<String>("tags", ["a", "b"])
-                store.setMap<String, Int32>("highScores", highScores)
-                store.setList<Chapter>("chapters", [Chapter("intro", 90)])
+            Tab(index: 1, label: "Conformance", icon: "checkmark") {
+                Column(spacing: 12) {
+                    Button("Generic ees") {
+                        store.setObject("options", PlayerOptions(true, 0.5, PlaybackState.playing, ["a"]))
+                        store.setObject("ratio", 0.75)
+                        store.setList<Int32>("launches-list", [1, 2, 3])
+                        store.setSet<String>("tags", ["a", "b"])
+                        store.setMap<String, Int32>("highScores", highScores)
+                        store.setList<Chapter>("chapters", [Chapter("intro", 90)])
 
-                options = store.getObject("options")
-                ratio = store.getObject<Float64>("ratio") ?? 0
-                tags = store.getSet<String>("tags") ?? []
-                highScores = store.getMap<String, Int32>("highScores") ?? ["none": 0]
-                chapters = store.getList<Chapter>("chapters") ?? []
-            }
+                        options = store.getObject("options")
+                        ratio = store.getObject<Float64>("ratio") ?? 0
+                        tags = store.getSet<String>("tags") ?? []
+                        highScores = store.getMap<String, Int32>("highScores") ?? ["none": 0]
+                        chapters = store.getList<Chapter>("chapters") ?? []
+                    }
 
-            Button("Key space") {
-                keys = store.getAllKeys()
-                keys = store.getAllKeysWithPrefix("options")
-                keys = store.getAllKeysWithSuffix("e")
-                keys = store.getAllKeysMatching("opt", "s")
-                store.remove("name")
-                store.removeMany(["raw", "ratio"])
-                store.trim()
-                keyCount = store.count()
-                totalSize = store.totalSize()
-                actualSize = store.actualSize()
-                pageSize = store.pageSize
-                store.sync()
-                store.asyncFlush()
-                store.checkContentChanged()
-            }
+                    Button("Key space") {
+                        keys = store.getAllKeys()
+                        keys = store.getAllKeysWithPrefix("options")
+                        keys = store.getAllKeysWithSuffix("e")
+                        keys = store.getAllKeysMatching("opt", "s")
+                        store.remove("name")
+                        store.removeMany(["raw", "ratio"])
+                        store.trim()
+                        keyCount = store.count()
+                        totalSize = store.totalSize()
+                        actualSize = store.actualSize()
+                        pageSize = store.pageSize
+                        store.sync()
+                        store.asyncFlush()
+                        store.checkContentChanged()
+                    }
 
-            Button("Files") {
-                store.backup("conformance-backup")
-                store.restore("conformance-backup")
-            }
+                    Button("Files") {
+                        store.backup("conformance-backup")
+                        store.restore("conformance-backup")
+                    }
 
-            Button("Clear") {
-                store.clearAll()
-                options = null
-                tags = []
-                chapters = []
+                    Button("Clear") {
+                        store.clearAll()
+                        options = null
+                        tags = []
+                        chapters = []
+                    }
+                }
             }
         }
     }

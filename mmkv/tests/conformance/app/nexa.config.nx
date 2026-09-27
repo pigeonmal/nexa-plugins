@@ -1,0 +1,9 @@
+config {
+    app { displayName: "MmkvConformance", version: "0.1.0", buildNumber: 1, deepLinks: [] }
+    ios { minVersion: "16.0", bundleIdentifier: "dev.nexa.mmkv.conformance" }
+    android { minSdk: 24, targetSdk: 36, applicationId: "dev.nexa.mmkv.conformance" }
+    permissions {}
+    dependencies {
+        MMKV { id: "dev.nexa.mmkv", path: "../../.." }
+    }
+}

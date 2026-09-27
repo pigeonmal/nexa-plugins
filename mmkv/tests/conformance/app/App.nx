@@ -1,0 +1,115 @@
+// A conformance app for the MMKV plugin: every shape the contract declares has
+// to compile and round-trip on both platforms, so a change to the contract or
+// to the value codec shows up as a compile failure here rather than in an app.
+//
+// Run it with:
+//   nexa test --ios      # build/ios
+//   nexa test --android  # build/android
+plugin "dev.nexa.mmkv" as MMKV
+
+struct PlayerOptions {
+    autoplay: Bool,
+    volume: Float64,
+    state: PlaybackState,
+    tags: Array<String>,
+}
+
+struct Chapter {
+    title: String,
+    seconds: Int64,
+}
+
+app MmkvConformance {
+    enum PlaybackState {
+        idle,
+        preparing,
+        ready,
+        playing,
+        paused,
+        ended,
+        failed,
+    }
+
+    let store = MMKV.MMKVStore("conformance", "conformance-key", true)
+
+    state launches: Int32 = 0
+    state ratio: Float64 = 0
+    state enabled: Bool = false
+    state name: String = ""
+    state raw: Bytes? = null
+    state options: PlayerOptions? = null
+    state chapters: Array<Chapter> = []
+    state tags: Set<String> = []
+    state highScores: Map<String, Int32> = ["none": 0]
+    state keys: Array<String> = []
+    state keyCount: Int64 = 0
+    state totalSize: Int64 = 0
+    state actualSize: Int64 = 0
+    state pageSize: Int64 = 0
+
+    body {
+        Column(spacing: 12) {
+            Button("Scalars") {
+                store.setBool("enabled", true)
+                store.setInt32("launches", 7)
+                store.setInt64("big", 9000000000)
+                store.setUInt32("count", 12)
+                store.setUInt64("size", 1000)
+                store.setFloat32("ratio32", 0.5)
+                store.setFloat64("ratio", 0.5)
+                store.setString("name", "nexa")
+                store.setBuffer("raw", Bytes.fromText(text: "payload"))
+
+                enabled = store.getBool("enabled") ?? false
+                launches = store.getInt32("launches") ?? 0
+                name = store.getString("name") ?? ""
+                raw = store.getBuffer("raw")
+                ratio = store.getFloat64("ratio") ?? 0
+            }
+
+            Button("Generics") {
+                store.setObject("options", PlayerOptions(true, 0.5, PlaybackState.playing, ["a"]))
+                store.setObject("ratio", 0.75)
+                store.setList<Int32>("launches-list", [1, 2, 3])
+                store.setSet<String>("tags", ["a", "b"])
+                store.setMap<String, Int32>("highScores", highScores)
+                store.setList<Chapter>("chapters", [Chapter("intro", 90)])
+
+                options = store.getObject("options")
+                ratio = store.getObject<Float64>("ratio") ?? 0
+                tags = store.getSet<String>("tags") ?? []
+                highScores = store.getMap<String, Int32>("highScores") ?? ["none": 0]
+                chapters = store.getList<Chapter>("chapters") ?? []
+            }
+
+            Button("Key space") {
+                keys = store.getAllKeys()
+                keys = store.getAllKeysWithPrefix("options")
+                keys = store.getAllKeysWithSuffix("e")
+                keys = store.getAllKeysMatching("opt", "s")
+                store.remove("name")
+                store.removeMany(["raw", "ratio"])
+                store.trim()
+                keyCount = store.count()
+                totalSize = store.totalSize()
+                actualSize = store.actualSize()
+                pageSize = store.pageSize
+                store.sync()
+                store.asyncFlush()
+                store.checkContentChanged()
+            }
+
+            Button("Files") {
+                store.backup("conformance-backup")
+                store.restore("conformance-backup")
+            }
+
+            Button("Clear") {
+                store.clearAll()
+                options = null
+                tags = []
+                chapters = []
+            }
+        }
+    }
+}

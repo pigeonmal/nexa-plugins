@@ -1,0 +1,29 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.mmkv"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "13.0"
+        sources: ["ios/Sources/**/*.swift"]
+        dependencies {
+            // The fork's release tags predate its SwiftPM manifest, so the
+            // package is pinned to an exact commit instead of a version.
+            swiftPackage {
+                url: "https://github.com/margelo/MMKV.git"
+                revision: "9b62e4ea9dbf2dee0a7148b96e84722409dc2400"
+                products: ["MMKV"]
+            }
+        }
+    }
+    android {
+        minSdk: 21
+        sources: ["android/src/main/kotlin/**/*.kt"]
+        // Ships armeabi-v7a and x86 alongside the 64-bit ABIs, so 32-bit
+        // devices are supported; upstream `com.tencent:mmkv` dropped 32-bit
+        // in 2.0.0.
+        dependencies: ["io.github.zhongwuzw:mmkv:2.4.2"]
+    }
+}

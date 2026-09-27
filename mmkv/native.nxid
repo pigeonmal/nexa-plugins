@@ -1,0 +1,155 @@
+// MMKV storage contract.
+//
+// Every call is synchronous: MMKV is a memory-mapped store, so a read is a
+// pointer walk and a write is a protobuf append into the mapped page. Nothing
+// here crosses an async boundary.
+//
+// Values MMKV stores natively - scalars, strings, and byte buffers - map onto
+// it one to one. Everything else is stored as one buffer through the value
+// codec the compiler generates for the bound type, so an app struct, an
+// array, a set, or a map is a single direct native call with a statically
+// generated writer or reader, and the same value produces the same bytes on
+// both platforms.
+
+/// Instance-level counters, in bytes where the name says so.
+struct MMKVStats {
+    keyCount: Int64
+    totalSize: Int64
+    actualSize: Int64
+    pageSize: Int64
+}
+
+/// One MMKV store. Instances are cheap: MMKV maps the file per instance id,
+/// so `MMKVStore("user")` and `MMKVStore("cache")` are independent stores
+/// that coexist in one process.
+///
+/// The constructor maps the file, which also initializes MMKV itself, so
+/// `.nx` code never has to set MMKV up before its first read or write.
+native class MMKVStore {
+    /// `cryptKey` enables AES encryption, and `multiProcess` turns on
+    /// cross-process locking. Both must match the values the store was created
+    /// with: MMKV validates them when the file is mapped.
+    init(instanceID: String, cryptKey: String?, multiProcess: Bool)
+
+    /// The instance id this store was opened with.
+    readonly property instanceID: String
+    /// Whether the store was opened with an encryption key.
+    readonly property isEncrypted: Bool
+    /// Whether the store was opened in multi-process mode.
+    readonly property isMultiProcess: Bool
+    /// Resolved MMKV root directory, where the store files live.
+    readonly property rootDirectory: String
+    /// MMKV core version string.
+    readonly property version: String
+    /// MMKV mmap page size in bytes.
+    readonly property pageSize: Int64
+
+    // Scalars. Setters report whether MMKV accepted the write; getters return
+    // `null` for a missing key, so `store.getInt32("count") ?? 0` reads
+    // naturally.
+    fn setBool(key: String, value: Bool) -> Bool
+    fn getBool(key: String) -> Bool?
+    fn setInt32(key: String, value: Int32) -> Bool
+    fn getInt32(key: String) -> Int32?
+    fn setInt64(key: String, value: Int64) -> Bool
+    fn getInt64(key: String) -> Int64?
+    fn setUInt32(key: String, value: UInt32) -> Bool
+    fn getUInt32(key: String) -> UInt32?
+    fn setUInt64(key: String, value: UInt64) -> Bool
+    fn getUInt64(key: String) -> UInt64?
+    fn setFloat32(key: String, value: Float32) -> Bool
+    fn getFloat32(key: String) -> Float32?
+    fn setFloat64(key: String, value: Float64) -> Bool
+    fn getFloat64(key: String) -> Float64?
+    fn setString(key: String, value: String) -> Bool
+    fn getString(key: String) -> String?
+    /// Raw byte buffer. The buffer is copied out of the mapped page, so it
+    /// stays valid after the next write.
+    fn setBuffer(key: String, value: Bytes) -> Bool
+    fn getBuffer(key: String) -> Bytes?
+
+    // Values without an MMKV-native type. `T` is bound per call site - from
+    // the argument for a setter, from the expected type or an explicit type
+    // argument for a getter - to a scalar, a buffer, an enum, an app struct,
+    // or a collection of those.
+    //
+    //     store.setObject("playerOption", options)
+    //     let options: PlayerOptions? = store.getObject("playerOption")
+    fn setObject<T>(key: String, value: T) -> Bool
+    fn getObject<T>(key: String) -> T?
+    /// One encoded value per key holding an array.
+    fn setList<T>(key: String, values: Array<T>) -> Bool
+    fn getList<T>(key: String) -> Array<T>?
+    /// One encoded value per key holding a set.
+    fn setSet<T>(key: String, values: Set<T>) -> Bool
+    fn getSet<T>(key: String) -> Set<T>?
+    /// One encoded value per key holding a map. Keys are written sorted, so
+    /// the same map always produces the same bytes.
+    fn setMap<K, V>(key: String, values: Map<K, V>) -> Bool
+    fn getMap<K, V>(key: String) -> Map<K, V>?
+
+    // Key space.
+    fn contains(key: String) -> Bool
+    /// Every key in the store, sorted.
+    fn getAllKeys() -> Array<String>
+    fn getAllKeysWithPrefix(prefix: String) -> Array<String>
+    fn getAllKeysWithSuffix(suffix: String) -> Array<String>
+    fn getAllKeysMatching(prefix: String, suffix: String) -> Array<String>
+    /// Removes one key and reports whether it existed.
+    fn remove(key: String) -> Bool
+    /// Removes every listed key, returning how many were present.
+    fn removeMany(keys: Array<String>) -> Int32
+    /// Removes every key and keeps the mapped file at its current size.
+    fn clearAll() -> Bool
+    /// Removes every key and releases the mapped pages.
+    fn clearAllKeepingSpace() -> Bool
+    /// Compacts the file, returning the space reclaimed in bytes.
+    fn trim() -> Int64
+
+    // Introspection and maintenance.
+    fn count() -> Int64
+    fn totalSize() -> Int64
+    fn actualSize() -> Int64
+    /// Bytes the value for `key` occupies, including its protobuf overhead.
+    fn valueSize(key: String) -> Int64
+    fn stats() -> MMKVStats
+    /// Flushes pending writes to disk.
+    fn sync()
+    /// Queues a flush on MMKV's own writer thread.
+    fn asyncFlush()
+    /// Re-encrypts the store with a new key, or removes encryption when the
+    /// key is `null`. MMKV does not validate key length: AES-128 uses up to
+    /// 16 bytes and AES-256 up to 32.
+    fn rekey(cryptKey: String?) -> Bool
+    /// Re-reads the file when another process wrote to it. Multi-process
+    /// stores refresh on the next access anyway; this exists for callers that
+    /// want to refresh before a read.
+    fn checkContentChanged()
+
+    // Store files. Each acts on this store's instance id.
+    /// Whether a store file exists for this instance id.
+    fn storageExists() -> Bool
+    /// Copies this store into `directory`.
+    fn backup(directory: String) -> Bool
+    /// Replaces this store with the copy in `directory`.
+    fn restore(directory: String) -> Bool
+    /// Deletes this store's files from disk.
+    fn removeStorage() -> Bool
+
+    // Change listeners. `observe` registers a key; writes to observed keys,
+    // including writes made by another process, fire `valueChanged` with the
+    // key. A key is observed once regardless of how many handlers are
+    // installed.
+    fn observe(key: String)
+    fn unobserve(key: String)
+    fn unobserveAll()
+
+    /// Fired for every observed key that changed.
+    event valueChanged(key: String)
+    /// Fired when another process wrote to this store.
+    event contentChanged()
+
+    /// Releases the store handle. The mapped file stays on disk; a later
+    /// `MMKVStore` with the same instance id reads it again.
+    fn dispose()
+}

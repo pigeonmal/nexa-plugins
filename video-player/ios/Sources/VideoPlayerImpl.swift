@@ -1,7 +1,7 @@
 import AVFoundation
 import AVKit
 import SwiftUI
-#if os(iOS)
+#if os(iOS) && canImport(KSPlayer)
 import KSPlayer
 #endif
 
@@ -92,7 +92,7 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
     public var onEnded: (() -> Void)?
 
     fileprivate var player: AVPlayer? { engine.player }
-#if os(iOS)
+#if os(iOS) && canImport(KSPlayer)
     fileprivate var ksPlayerEngine: KSPlayerEngine? { engine as? KSPlayerEngine }
 #endif
     private var engine: any VideoPlayerEngine
@@ -154,7 +154,7 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
 
         engine.onEnded = nil
         engine.dispose()
-#if os(iOS)
+#if os(iOS) && canImport(KSPlayer)
         let configuredEngine: any VideoPlayerEngine = softwareDecodingEnabled
             ? KSPlayerEngine()
             : AVPlayerEngine()
@@ -231,10 +231,16 @@ public struct VideoViewImpl<Content: View>: View {
 
     public var body: some View {
         Group {
-#if os(iOS)
+#if os(iOS) && canImport(KSPlayer)
             if let engine = player.ksPlayerEngine {
                 KSVideoPlayerController(engine: engine, controls: controls)
             } else if let player = player.player {
+                VideoPlayerController(player: player, controls: controls)
+            } else {
+                Color.black
+            }
+#elseif os(iOS)
+            if let player = player.player {
                 VideoPlayerController(player: player, controls: controls)
             } else {
                 Color.black
@@ -249,7 +255,7 @@ public struct VideoViewImpl<Content: View>: View {
     }
 }
 
-#if os(iOS)
+#if os(iOS) && canImport(KSPlayer)
 @MainActor
 fileprivate final class KSPlayerEngine: VideoPlayerEngine, KSPlayerLayerDelegate {
     private typealias PrepareResult = Result<Double, PlayerError>
@@ -414,7 +420,9 @@ private struct KSVideoPlayerController: UIViewRepresentable {
         engine.attachControlView(view)
     }
 }
+#endif
 
+#if os(iOS)
 private struct VideoPlayerController: UIViewControllerRepresentable {
     let player: AVPlayer
     let controls: Bool

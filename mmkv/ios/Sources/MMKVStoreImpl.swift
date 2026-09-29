@@ -22,7 +22,8 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     public var onContentChanged: (() -> Void)?
 
     private let mode: MMKVMode
-    private let cryptKey: Data?
+    private var cryptKey: Data?
+    private var compareBeforeSetForUnencryptedStore = true
     private let store: MMKV?
     private var observedKeys: Set<String> = []
     private var isDisposed = false
@@ -40,6 +41,9 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
             aes256: false,
             mode: self.mode
         )
+        if self.cryptKey == nil {
+            self.store?.enableCompareBeforeSet()
+        }
         if multiProcess {
             MMKVStoreObserver.shared.register(self)
         }
@@ -269,17 +273,45 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
 
     public func enableCompareBeforeSet() -> Bool {
         guard !isEncrypted, let store else { return false }
-        return store.enableCompareBeforeSet()
+        let enabled = store.enableCompareBeforeSet()
+        if enabled {
+            compareBeforeSetForUnencryptedStore = true
+        }
+        return enabled
     }
 
     public func disableCompareBeforeSet() -> Bool {
         guard let store else { return false }
-        return store.disableCompareBeforeSet()
+        if isEncrypted {
+            compareBeforeSetForUnencryptedStore = false
+            return true
+        }
+        let disabled = store.disableCompareBeforeSet()
+        if disabled {
+            compareBeforeSetForUnencryptedStore = false
+        }
+        return disabled
     }
 
     public func rekey(_ cryptKey: String?) -> Bool {
         guard let store else { return false }
-        return store.reset(cryptKey: cryptKey.map { Data($0.utf8) })
+        let wasEncrypted = isEncrypted
+        if cryptKey != nil && !wasEncrypted {
+            store.disableCompareBeforeSet()
+        }
+
+        guard store.reset(cryptKey: cryptKey.map({ Data($0.utf8) })) else {
+            if !wasEncrypted && compareBeforeSetForUnencryptedStore {
+                store.enableCompareBeforeSet()
+            }
+            return false
+        }
+
+        self.cryptKey = cryptKey.map { Data($0.utf8) }
+        if cryptKey == nil && compareBeforeSetForUnencryptedStore {
+            store.enableCompareBeforeSet()
+        }
+        return true
     }
 
     public func checkContentChanged() {

@@ -21,6 +21,7 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     override val instanceID: String
     override val isMultiProcess: Boolean
     override val isEncrypted: Boolean
+        get() = cryptKey != null
     override val rootDirectory: String
     override val version: String
     override val pageSize: Long
@@ -30,7 +31,10 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     @Volatile
     override var onContentChanged: (() -> Unit)? = null
 
-    private val cryptKey: String?
+    @Volatile
+    private var cryptKey: String?
+    @Volatile
+    private var compareBeforeSetForUnencryptedStore = true
     private val store: MMKV?
     @Volatile
     private var observedKeys: MutableSet<String>? = null
@@ -40,11 +44,15 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         this.instanceID = instanceID
         this.cryptKey = cryptKey
         this.isMultiProcess = multiProcess
-        this.isEncrypted = this.cryptKey != null
 
         // MMKV.initialize loads its native library. Registering the handler
         // first calls a JNI method before that library is loaded.
-        val rootDir = MMKV.initialize(NexaRuntimeCore.context().applicationContext)
+        // Match iOS's quiet initialization. MMKV's default INFO logger emits
+        // native logcat messages during writes, adding work to the hot path.
+        val rootDir = MMKV.initialize(
+            NexaRuntimeCore.context().applicationContext,
+            MMKVLogLevel.LevelNone,
+        )
         this.rootDirectory = rootDir
         this.version = MMKV.version()
         this.pageSize = MMKV.pageSize().toLong()
@@ -60,6 +68,9 @@ public class MMKVStoreImpl : MMKVStoreSpec {
             // A store that cannot be mapped reads as absent rather than
             // taking the process down; every operation below reports failure.
             null
+        }
+        if (this.cryptKey == null) {
+            this.store?.enableCompareBeforeSet()
         }
         if (multiProcess) {
             // Outer-process callbacks only apply to stores using MMKV's shared
@@ -277,17 +288,47 @@ public class MMKVStoreImpl : MMKVStoreSpec {
             return false
         }
         store.enableCompareBeforeSet()
-        return store.isCompareBeforeSetEnabled
+        val enabled = store.isCompareBeforeSetEnabled
+        if (enabled) {
+            compareBeforeSetForUnencryptedStore = true
+        }
+        return enabled
     }
 
     override fun disableCompareBeforeSet(): Boolean {
         val store = store ?: return false
+        if (isEncrypted) {
+            compareBeforeSetForUnencryptedStore = false
+            return true
+        }
         store.disableCompareBeforeSet()
-        return !store.isCompareBeforeSetEnabled
+        val disabled = !store.isCompareBeforeSetEnabled
+        if (disabled) {
+            compareBeforeSetForUnencryptedStore = false
+        }
+        return disabled
     }
 
-    override fun rekey(cryptKey: String?): Boolean =
-        store?.reKey(cryptKey) ?: false
+    override fun rekey(cryptKey: String?): Boolean {
+        val store = store ?: return false
+        val wasEncrypted = isEncrypted
+        if (cryptKey != null && !wasEncrypted) {
+            store.disableCompareBeforeSet()
+        }
+
+        if (!store.reKey(cryptKey)) {
+            if (!wasEncrypted && compareBeforeSetForUnencryptedStore) {
+                store.enableCompareBeforeSet()
+            }
+            return false
+        }
+
+        this.cryptKey = cryptKey
+        if (cryptKey == null && compareBeforeSetForUnencryptedStore) {
+            store.enableCompareBeforeSet()
+        }
+        return true
+    }
 
     override fun checkContentChanged() {
         store?.checkContentChangedByOuterProcess()

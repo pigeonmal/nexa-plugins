@@ -9,11 +9,9 @@ plugin {
         minVersion: "13.0"
         sources: ["ios/Sources/**/*.swift"]
         dependencies {
-            // The fork's release tags predate its SwiftPM manifest, so the
-            // package is pinned to an exact commit instead of a version.
             swiftPackage {
-                url: "https://github.com/margelo/MMKV.git"
-                revision: "9b62e4ea9dbf2dee0a7148b96e84722409dc2400"
+                url: "https://github.com/Tencent/MMKV.git"
+                from: "2.4.2"
                 products: ["MMKV"]
             }
         }

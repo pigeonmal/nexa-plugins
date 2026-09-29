@@ -65,12 +65,14 @@ version field alongside the change.
 `cryptKey` for AES encryption, and `multiProcess = true` when another process
 writes the same file. Both must match the values the store was created with.
 
-For workloads that often write an unchanged value, `enableCompareBeforeSet()`
-asks MMKV to compare the new value with the stored value and skip redundant
-appends. It returns `false` if MMKV cannot enable the option. This optimization
-is incompatible with encryption and key expiration; leave it disabled when
-values usually change, since comparing adds work to those writes. Call
-`disableCompareBeforeSet()` to turn it off again.
+Unencrypted stores enable MMKV's compare-before-set optimization by default.
+Repeated writes of the same value skip redundant appends. This optimization is
+incompatible with encryption and key expiration. When most writes change the
+value, call `disableCompareBeforeSet()` to avoid comparing it; call
+`enableCompareBeforeSet()` to turn the optimization back on. Both methods
+return `false` when MMKV cannot apply the requested setting. Rekeying to an
+encrypted store always disables comparison; rekeying back to an unencrypted
+store restores the last requested comparison setting.
 
 `rekey` re-encrypts an existing store with a new key, or removes encryption
 when the key is `null`. MMKV uses up to 16 bytes of the key for AES-128 and up
@@ -85,8 +87,7 @@ every observed key of that store is reported.
 
 ## Platform notes
 
-- The iOS package is pinned to an exact commit, because the upstream fork's
-  release tags predate its SwiftPM manifest.
+- iOS uses the official Tencent MMKV Swift package from version 2.4.2.
 - The Android artifact is `io.github.zhongwuzw:mmkv`, which still ships
   32-bit ABIs; upstream `com.tencent:mmkv` dropped them in 2.0.0.
 - A file that fails its CRC or length check is recovered, not discarded, so a

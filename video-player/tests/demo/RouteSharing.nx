@@ -1,0 +1,34 @@
+plugin "../../" as VideoPlayer
+
+app VideoPlayerRouteSharing {
+    let sharedPlayer = VideoPlayer()
+
+    screen Library {
+        Column {
+            Text("Library")
+            Button("Play shared player") {
+                sharedPlayer.play()
+            }
+            NavigationLink(destination: Details) {
+                Text("Open details")
+            }
+        }
+    }
+
+    screen Details {
+        Column {
+            Text("Details")
+            Button("Pause shared player") {
+                sharedPlayer.pause()
+            }
+            NavigationBack()
+        }
+    }
+
+    body {
+        OnDisappear {
+            sharedPlayer.dispose()
+        }
+        NavigationStack(root: Library)
+    }
+}

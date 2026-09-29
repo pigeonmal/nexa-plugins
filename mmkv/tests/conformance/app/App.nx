@@ -44,6 +44,8 @@ app MmkvConformance {
     let store = MMKV.MMKVStore("conformance", "conformance-key", true)
     let benchmarkStore = MMKV.MMKVStore("conformance-benchmark", null, false)
     let compareBenchmarkStore = MMKV.MMKVStore("conformance-benchmark-compare", null, false)
+    let benchmarkStringKey = "bench-string"
+    let benchmarkStringValue = "benchmark-value"
 
     state benchmarkGeneration: Int32 = 0
     state benchmarkStartedAt: Int64 = 0
@@ -85,39 +87,41 @@ app MmkvConformance {
                     Text("String benchmarks use an unencrypted single-process store and reuse one key and value; setup and warm-up are excluded.")
 
                     Button("Benchmark strings (1,000)") {
+                        benchmarkStore.disableCompareBeforeSet()
                         for index in 0..<10 {
-                            benchmarkStore.getString("bench-string")
-                            benchmarkStore.setString("bench-string", "benchmark-value")
+                            benchmarkStore.getString(benchmarkStringKey)
+                            benchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         }
 
                         benchmarkStartedAt = Time.monotonic()
                         for index in 0..<1000 {
-                            benchmarkStore.setString("bench-string", "benchmark-value")
+                            benchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         }
                         stringWriteNs = Time.elapsed(since: benchmarkStartedAt)
 
-                        benchmarkStore.setString("bench-string", "benchmark-value")
+                        benchmarkStore.enableCompareBeforeSet()
+                        benchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         for index in 0..<10 {
-                            benchmarkStore.getString("bench-string")
+                            benchmarkStore.getString(benchmarkStringKey)
                         }
                         benchmarkStartedAt = Time.monotonic()
                         for index in 0..<1000 {
-                            benchmarkStore.getString("bench-string")
+                            benchmarkStore.getString(benchmarkStringKey)
                         }
                         stringReadNs = Time.elapsed(since: benchmarkStartedAt)
 
                         stringCompareBeforeSetEnabled = compareBenchmarkStore.enableCompareBeforeSet()
                         for index in 0..<10 {
-                            compareBenchmarkStore.setString("bench-string", "benchmark-value")
+                            compareBenchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         }
                         benchmarkStartedAt = Time.monotonic()
                         for index in 0..<1000 {
-                            compareBenchmarkStore.setString("bench-string", "benchmark-value")
+                            compareBenchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         }
                         stringCompareWriteNs = Time.elapsed(since: benchmarkStartedAt)
-                        Log.info(message: "MMKV string read: $stringReadNs ns; write: $stringWriteNs ns; unchanged write with compare-before-set ($stringCompareBeforeSetEnabled): $stringCompareWriteNs ns")
+                        Log.info(message: "MMKV string read: $stringReadNs ns; write with comparison disabled: $stringWriteNs ns; unchanged write with compare-before-set ($stringCompareBeforeSetEnabled): $stringCompareWriteNs ns")
                     }
-                    Text("String read: $stringReadNs ns; write: $stringWriteNs ns")
+                    Text("String read: $stringReadNs ns; write with comparison disabled: $stringWriteNs ns")
                     Text("Unchanged value with compare-before-set: $stringCompareWriteNs ns (enabled: $stringCompareBeforeSetEnabled)")
 
                     Button("Benchmark Int32 (1,000)") {

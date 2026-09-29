@@ -1,0 +1,11 @@
+// Typed native contract for `dev.nexa.sensors`.
+//
+// Structs, enums, and error types become Swift types and Kotlin
+// classes. `native class` declarations become direct contracts:
+// implement `SensorsImpl` and the compiler aliases `Sensors` to it.
+
+native class Sensors {
+    init()
+
+    fn dispose()
+}

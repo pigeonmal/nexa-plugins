@@ -28,14 +28,12 @@ media sample and container formats for the target devices.
 NextLib is GPL-3.0 licensed. Apps that ship its Android dependency must comply
 with its license. The iOS plugin has no third-party playback dependency.
 
-## Example
+## Maintainer validation app
 
-The self-contained two-player Nexa app in [`tests/demo/app/App.nx`](tests/demo/app/App.nx)
-shows setup, typed error handling, independent controls, event subscriptions,
-and disposal. The first player starts after preparation so Android PiP can be
-tried by sending the app to the background while it is playing. From that
-directory, use `nexa check App.nx`, then `nexa test` for native project
-compilation or `nexa dev` to launch the development host.
+The internal two-player app in [`tests/demo/app/App.nx`](tests/demo/app/App.nx)
+is used to validate setup, typed errors, independent controls, event
+subscriptions, disposal, and Android PiP. It is a plugin test fixture, not a
+curated Nexa app example.
 
 App-level plugin calls, supported properties, event handlers, and component
 arguments hot reload through Nexa's generated DevRuntime adapters. Changes to

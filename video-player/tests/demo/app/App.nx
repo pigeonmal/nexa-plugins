@@ -37,8 +37,9 @@ app VideoPlayerDemo {
             player1.ended { firstEnded = true }
             player2.ended { secondEnded = true }
             try {
-                await player1.prepare("https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
-                await player2.prepare("https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4")
+                await player1.prepare("https://media.w3.org/2010/05/sintel/trailer.mp4")
+                player1.play()
+                await player2.prepare("https://media.w3.org/2010/05/sintel/trailer.mp4")
             } catch {
                 case VideoPlayer.PlayerError.invalidUrl {
                     loadFailed = true

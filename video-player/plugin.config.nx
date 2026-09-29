@@ -12,6 +12,7 @@ plugin {
     }
     android {
         minSdk: 23
+        pictureInPicture: true
         sources: ["android/src/main/kotlin/**/*.kt"]
         dependencies: [
             "androidx.media3:media3-exoplayer:1.11.1",

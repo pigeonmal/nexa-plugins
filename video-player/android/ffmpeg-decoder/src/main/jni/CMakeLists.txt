@@ -1,0 +1,94 @@
+#
+# Copyright 2021 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# LINT.IfChange
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+# LINT.ThenChange(../../../build.gradle.kts)
+
+# Enable C++11 features.
+set(CMAKE_CXX_STANDARD 11)
+
+project(libffmpegJNI C CXX)
+
+set(ffmpeg_location "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg")
+set(ffmpeg_binaries "${ffmpeg_location}/android-libs/${ANDROID_ABI}")
+
+foreach(ffmpeg_lib avutil swresample avcodec swscale)
+    set(ffmpeg_lib_filename lib${ffmpeg_lib}.so)
+    set(ffmpeg_lib_file_path ${ffmpeg_binaries}/${ffmpeg_lib_filename})
+    add_library(
+            ${ffmpeg_lib}
+            SHARED
+            IMPORTED)
+    set_target_properties(
+            ${ffmpeg_lib} PROPERTIES
+            IMPORTED_LOCATION
+            ${ffmpeg_lib_file_path})
+endforeach()
+
+
+set(yuv_location "${CMAKE_CURRENT_SOURCE_DIR}/libyuv")
+set(yuv_binaries "${yuv_location}/android-libs/${ANDROID_ABI}")
+
+foreach(yuv_lib yuv)
+    set(yuv_lib_filename lib${yuv_lib}.so)
+    set(yuv_lib_file_path ${yuv_binaries}/${yuv_lib_filename})
+    add_library(
+            ${yuv_lib}
+            SHARED
+            IMPORTED)
+    set_target_properties(
+            ${yuv_lib} PROPERTIES
+            IMPORTED_LOCATION
+            ${yuv_lib_file_path})
+endforeach()
+
+
+include_directories("${yuv_location}/include")
+
+find_library(android_log_lib log)
+
+add_library(ffmpegJNI
+            SHARED
+            ffmpeg_jni.cc)
+
+# FFmpeg's source root contains a plain-text `version` file. Putting it on the
+# normal include path shadows libc++'s C++20 `<version>` header, so search it
+# only after the NDK's standard headers.
+target_compile_options(ffmpegJNI PRIVATE -idirafter "${ffmpeg_location}")
+
+set_target_properties(ffmpegJNI PROPERTIES
+                      CXX_VISIBILITY_PRESET hidden
+                      VISIBILITY_INLINES_HIDDEN ON)
+
+target_link_libraries(ffmpegJNI
+                      PRIVATE android
+                      PRIVATE swresample
+                      PRIVATE avcodec
+                      PRIVATE avutil
+                      PRIVATE swscale
+                      PRIVATE yuv
+                      PRIVATE ${android_log_lib})
+
+# Additional flags needed for "arm64-v8a" from NDK 23.1.7779620 and above.
+# See https://github.com/google/ExoPlayer/issues/9933#issuecomment-1029775358.
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    target_link_options(ffmpegJNI PRIVATE "-Wl,-Bsymbolic")
+endif()
+
+# Enable 16 KB ELF alignment.
+target_link_options(ffmpegJNI
+                    PRIVATE "-Wl,-z,max-page-size=16384")

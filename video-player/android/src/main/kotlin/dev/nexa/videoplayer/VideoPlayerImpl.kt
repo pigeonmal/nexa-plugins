@@ -28,10 +28,8 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cronet.CronetDataSource
 import androidx.media3.datasource.cronet.CronetUtil
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
-import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -73,13 +71,7 @@ public class VideoPlayerImpl : VideoPlayerSpec {
                     .setDataSourceFactory(VideoPlayerCronetRuntime.dataSourceFactory(applicationContext)),
             )
             .setRenderersFactory(
-                NextRenderersFactory(applicationContext).setExtensionRendererMode(
-                    if (softwareDecodingEnabled) {
-                        DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-                    } else {
-                        DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
-                    },
-                ),
+                NexaFfmpegRenderersFactory(applicationContext, softwareDecodingEnabled),
             )
             .build()
         nativePlayer = player

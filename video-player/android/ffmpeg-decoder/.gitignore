@@ -1,0 +1,6 @@
+/src/main/jni/ffmpeg/
+/src/main/jni/libyuv/
+/src/main/jniLibs/
+/build/
+/.gradle/
+/.cxx/

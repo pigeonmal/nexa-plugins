@@ -1,0 +1,9 @@
+FFmpeg 9.0.2
+Source archive SHA-256: 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+Source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+Configure: --disable-gpl --disable-version3 --disable-nonfree --disable-autodetect --disable-avformat
+Enabled decoders: h264 hevc vp8 vp9 av1 mpeg2video mpeg4 prores aac mp3 opus flac vorbis ac3 eac3
+Verified configuration for each ABI: CONFIG_GPL=0 CONFIG_GPLV3=0 CONFIG_VERSION3=0 CONFIG_NONFREE=0 in config.h
+Android NDK: /Users/elias/Library/Android/sdk/ndk/29.0.14206865
+libyuv commit: b25fa8992056629c99d7815516e7be6b82509897
+The libraries are separate shared objects; see the LGPL and BSD notices in assets/nexa/licenses.

@@ -7,12 +7,18 @@ with native playback controls.
 | Platform | Playback engine | Adaptive formats |
 |---|---|---|
 | iOS | AVPlayer | HLS |
-| Android | Media3 ExoPlayer with NextLib FFmpeg fallback | HLS and DASH |
+| Android | Media3 ExoPlayer with Nexa's LGPL-only FFmpeg fallback | HLS and DASH |
 
 On iOS, playback uses Apple's AVPlayer and its native decoder. On Android,
-`softwareDecodingEnabled: false` disables the NextLib FFmpeg fallback; the
-default is `true`. Android uses the app-packaged Cronet provider for media
-requests and shares its Cronet engine between player instances.
+`softwareDecodingEnabled: false` disables the FFmpeg extension renderer; the
+default is `true`. The FFmpeg renderer is appended after Media3's platform
+renderer, so it is selected only when the platform renderer cannot handle the
+stream. Android uses an LGPL-only FFmpeg 9.0.2 build with GPL, LGPLv3, and
+nonfree components disabled. The decoder is packaged as separate replaceable
+shared libraries; its source archive, configure checks, and notices are under
+[`android/ffmpeg-decoder`](android/ffmpeg-decoder). Android uses the app-packaged
+Cronet provider for media requests and shares its Cronet engine between player
+instances.
 
 On Android 8.0 and later, PiP starts when the user backgrounds the app while
 exactly one attached video player is actively playing. Android 12 and later use
@@ -21,12 +27,10 @@ PiP from the activity's user-leave callback. PiP stays disabled while playback
 is paused, the view is not visible, or the device does not advertise PiP support.
 The host activity opts into PiP only when this plugin is reachable.
 
-Android uses Media3 1.11.1, NextLib 1.11.1-0.16.0, the Media3 Cronet data
-source, and app-packaged Cronet. HLS and DASH manifests should use supported
-media sample and container formats for the target devices.
-
-NextLib is GPL-3.0 licensed. Apps that ship its Android dependency must comply
-with its license. The iOS plugin has no third-party playback dependency.
+Android uses Media3 1.11.1, the Media3 Cronet data source, and app-packaged
+Cronet. HLS and DASH manifests should use supported media sample and container
+formats for the target devices. The iOS plugin uses AVPlayer and has no
+third-party playback dependency.
 
 ## Maintainer validation app
 

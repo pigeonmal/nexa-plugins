@@ -1,0 +1,57 @@
+plugin "../../../" as AudioPlayer
+
+app AudioPlayerDemo {
+    let player = AudioPlayer()
+    let trackUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+    state stateChanged = false
+    state failureMessage = ""
+    state ended = false
+
+    body {
+        OnAppear async {
+            player.stateChanged { current ->
+                stateChanged = true
+            }
+            player.ended {
+                ended = true
+            }
+            player.updateMetadata("SoundHelix Song 1", "SoundHelix", "AudioPlayer demo")
+            try {
+                await player.prepare(trackUrl)
+                player.play()
+            } catch {
+                case AudioPlayer.AudioPlayerError.invalidUrl {
+                    failureMessage = "The track URL is invalid."
+                }
+                case AudioPlayer.AudioPlayerError.playbackFailed(message) {
+                    failureMessage = message
+                }
+            }
+        }
+        Column(spacing: 12) {
+            Text("AudioPlayer demo")
+            if stateChanged {
+                Text("Playback state changed")
+            }
+            Text("Position: \(player.currentTime) / \(player.duration)")
+            Button("Pause") {
+                player.pause()
+            }
+            Button("Resume") {
+                player.play()
+            }
+            Button("Seek to start") {
+                player.seek(0.0)
+            }
+            Button("Set volume to 50%") {
+                player.volume = 0.5
+            }
+            if ended {
+                Text("Playback ended")
+            }
+            if failureMessage != "" {
+                Text(failureMessage)
+            }
+        }
+    }
+}

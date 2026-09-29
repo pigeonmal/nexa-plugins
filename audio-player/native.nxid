@@ -1,0 +1,37 @@
+enum AudioPlaybackState {
+    idle
+    preparing
+    ready
+    playing
+    paused
+    ended
+    failed
+}
+
+error AudioPlayerError {
+    invalidUrl
+    playbackFailed(message: String)
+}
+
+/// One app-wide background audio session with direct native playback controls.
+native class AudioPlayer {
+    init()
+
+    readonly property state: AudioPlaybackState
+    readonly property duration: Float64
+    readonly property currentTime: Float64
+    property volume: Float64
+
+    /// Replaces the active stream. URLs must use http, https, or file.
+    async fn prepare(url: String) throws AudioPlayerError
+    fn updateMetadata(title: String, artist: String?, album: String?)
+    fn play()
+    fn pause()
+    fn seek(position: Float64)
+
+    event stateChanged(state: AudioPlaybackState)
+    event ended()
+
+    /// Stops the shared app session and releases this player handle.
+    fn dispose()
+}

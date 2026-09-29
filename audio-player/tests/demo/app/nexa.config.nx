@@ -1,0 +1,20 @@
+config {
+    app {
+        displayName: "AudioPlayerDemo",
+        version: "1.0.0",
+        buildNumber: 1,
+    }
+    ios {
+        minVersion: "17.0",
+        bundleIdentifier: "dev.nexa.audio.demo",
+    }
+    android {
+        minSdk: 26,
+        targetSdk: 36,
+        applicationId: "dev.nexa.audio.demo",
+    }
+    plugins {
+        AudioPlayer {
+        }
+    }
+}

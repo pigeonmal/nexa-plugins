@@ -1,0 +1,31 @@
+plugin "../../../" as MediaPicker
+
+app MediaPickerDemo {
+    state imageUri = ""
+    state videoUri = ""
+    state errorMessage = ""
+
+    body {
+        Column {
+            MediaPicker.MediaPickerControl(isVideo: false) {
+                Text("Choose image")
+            }.onPicked { uri ->
+                imageUri = uri
+            }.onFailed { message ->
+                errorMessage = message
+            }
+
+            MediaPicker.MediaPickerControl(isVideo: true) {
+                Text("Choose video")
+            }.onPicked { uri ->
+                videoUri = uri
+            }.onFailed { message ->
+                errorMessage = message
+            }
+
+            Text(imageUri)
+            Text(videoUri)
+            Text(errorMessage)
+        }
+    }
+}

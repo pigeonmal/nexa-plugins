@@ -1,0 +1,17 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.media-picker"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "17.0"
+        sources: ["ios/Sources/**/*.swift"]
+        frameworks: ["PhotosUI", "UniformTypeIdentifiers"]
+    }
+    android {
+        minSdk: 23
+        sources: ["android/src/main/kotlin/**/*.kt"]
+    }
+}

@@ -1,0 +1,8 @@
+// Permissionless system media pickers. Selected media is copied to the app's
+// cache directory and emitted as a local file URI.
+native component MediaPickerControl {
+    content
+    prop isVideo: Bool
+    event picked(uri: String)
+    event failed(message: String)
+}

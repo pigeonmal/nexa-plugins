@@ -1,0 +1,20 @@
+config {
+    app {
+        displayName: "VideoPlayerDemo",
+        version: "1.0.0",
+        buildNumber: 1,
+    }
+    ios {
+        minVersion: "17.0",
+        bundleIdentifier: "dev.nexa.video.demo",
+    }
+    android {
+        minSdk: 23,
+        targetSdk: 36,
+        applicationId: "dev.nexa.video.demo",
+    }
+    plugins {
+        VideoPlayer {
+        }
+    }
+}

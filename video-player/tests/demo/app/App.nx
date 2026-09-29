@@ -1,0 +1,95 @@
+plugin "../../../" as VideoPlayer
+
+component PlayerSurface(player: VideoPlayer.VideoPlayer, title: String) {
+    body {
+        PlayerMedia(player: player, title: title)
+    }
+}
+
+component PlayerMedia(player: VideoPlayer.VideoPlayer, title: String) {
+    state tapped = false
+
+    body {
+        VideoPlayer.VideoView(player: player) {
+            Column {
+                Text(title)
+                if tapped {
+                    Text("Tapped")
+                }
+            }
+        }.onTapped {
+            tapped = true
+        }
+    }
+}
+
+app VideoPlayerDemo {
+    let player1 = VideoPlayer()
+    let player2 = VideoPlayer()
+    state loadFailed = false
+    state loadError = ""
+    state firstEnded = false
+    state secondEnded = false
+    state secondTapped = false
+
+    body {
+        OnAppear async {
+            player1.ended { firstEnded = true }
+            player2.ended { secondEnded = true }
+            try {
+                await player1.prepare("https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
+                await player2.prepare("https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4")
+            } catch {
+                case VideoPlayer.PlayerError.invalidUrl {
+                    loadFailed = true
+                }
+                case VideoPlayer.PlayerError.decodingFailed(message) {
+                    loadFailed = true
+                    loadError = message
+                }
+            }
+        }
+        OnDisappear {
+            player1.dispose()
+            player2.dispose()
+        }
+        Column {
+            PlayerSurface(player: player1, title: "First player")
+            VideoPlayer.VideoView(player: player2, controls: false) {
+                Text("Second player")
+            }.onTapped {
+                secondTapped = true
+            }
+            Button("Play first player") {
+                player1.play()
+            }
+            Button("Pause first player") {
+                player1.pause()
+            }
+            Button("Play second player") {
+                player2.play()
+            }
+            Button("Pause second player") {
+                player2.pause()
+            }
+            Button("Set first volume") {
+                player1.volume = 0.5
+            }
+            Button("Set second volume") {
+                player2.volume = 0.25
+            }
+            if loadFailed {
+                Text(loadError)
+            }
+            if firstEnded {
+                Text("First player ended")
+            }
+            if secondEnded {
+                Text("Second player ended")
+            }
+            if secondTapped {
+                Text("Second view tapped")
+            }
+        }
+    }
+}

@@ -6,8 +6,13 @@ with native playback controls.
 
 | Platform | Playback engine | Adaptive formats |
 |---|---|---|
-| iOS | AVPlayer | HLS |
-| Android | Media3 ExoPlayer | HLS and DASH |
+| iOS | AVPlayer with KSPlayer FFmpeg fallback | HLS |
+| Android | Media3 ExoPlayer with NextLib FFmpeg fallback | HLS and DASH |
+
+Pass `softwareDecodingEnabled: false` to `VideoView` to disable the FFmpeg
+fallback and use the platform decoder path only. The default is `true`; platform
+decoders remain first choice. Android uses the app-packaged Cronet provider for
+media requests and shares its Cronet engine between player instances.
 
 On Android 8.0 and later, PiP starts when the user backgrounds the app while
 exactly one attached video player is actively playing. Android 12 and later use
@@ -16,9 +21,13 @@ PiP from the activity's user-leave callback. PiP stays disabled while playback
 is paused, the view is not visible, or the device does not advertise PiP support.
 The host activity opts into PiP only when this plugin is reachable.
 
-Android includes only the Media3 playback, HLS, DASH, and UI modules required by
-this package. HLS and DASH manifests should use supported media sample and
-container formats for the target devices.
+Android uses Media3 1.11.1, NextLib 1.11.1-0.16.0, the Media3 Cronet data
+source, and app-packaged Cronet. HLS and DASH manifests should use supported
+media sample and container formats for the target devices.
+
+NextLib and the default KSPlayer package are GPL-3.0 licensed. Apps that ship
+these dependencies must comply with their licenses. KSPlayer's author offers
+separate licensing options; see its upstream repository for details.
 
 ## Example
 

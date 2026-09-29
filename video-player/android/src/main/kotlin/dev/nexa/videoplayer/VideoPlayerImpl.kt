@@ -23,15 +23,25 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cronet.CronetDataSource
+import androidx.media3.datasource.cronet.CronetUtil
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
+import org.chromium.net.CronetEngine
 import java.net.URI
 import java.util.WeakHashMap
 import java.util.concurrent.CancellationException
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -54,9 +64,24 @@ public class VideoPlayerImpl : VideoPlayerSpec {
     internal var nativePlayer: ExoPlayer? = null
         private set
 
-    internal fun attachContext(context: Context) {
+    internal fun attachContext(context: Context, softwareDecodingEnabled: Boolean = true) {
         if (engine != null) return
-        val player = ExoPlayer.Builder(context.applicationContext).build()
+        val applicationContext = context.applicationContext
+        val player = ExoPlayer.Builder(applicationContext)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(applicationContext)
+                    .setDataSourceFactory(VideoPlayerCronetRuntime.dataSourceFactory(applicationContext)),
+            )
+            .setRenderersFactory(
+                NextRenderersFactory(applicationContext).setExtensionRendererMode(
+                    if (softwareDecodingEnabled) {
+                        DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                    } else {
+                        DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+                    },
+                ),
+            )
+            .build()
         nativePlayer = player
         attachEngine(ExoPlayerVideoPlayerEngine(player))
         engine?.setVolume(volume)
@@ -133,6 +158,32 @@ public class VideoPlayerImpl : VideoPlayerSpec {
         nativePlayer = null
         playerEngine?.release()
         state = PlayerState.idle
+    }
+}
+
+/** One embedded Cronet engine and response executor are shared by all players. */
+private object VideoPlayerCronetRuntime {
+    private val responseExecutor: Executor = Executors.newSingleThreadExecutor { command ->
+        Thread(command, "NexaVideoCronet").apply { isDaemon = true }
+    }
+
+    @Volatile
+    private var sharedEngine: CronetEngine? = null
+
+    fun dataSourceFactory(context: Context): DataSource.Factory {
+        val cronetFactory = CronetDataSource.Factory(engine(context), responseExecutor)
+        return DefaultDataSource.Factory(context.applicationContext, cronetFactory)
+    }
+
+    private fun engine(context: Context): CronetEngine {
+        sharedEngine?.let { return it }
+        return synchronized(this) {
+            sharedEngine ?: requireNotNull(
+                CronetUtil.buildCronetEngine(context.applicationContext, "NexaVideoPlayer", false),
+            ) {
+                "Embedded Cronet is unavailable; ensure cronet-embedded is packaged in the Android app"
+            }.also { sharedEngine = it }
+        }
     }
 }
 
@@ -262,6 +313,7 @@ private class ExoPlayerVideoPlayerEngine(private val player: ExoPlayer) : VideoP
 public fun VideoViewImpl(
     player: VideoPlayer,
     controls: Boolean,
+    softwareDecodingEnabled: Boolean,
     onTapped: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -274,7 +326,7 @@ public fun VideoViewImpl(
         AndroidView(
             modifier = if (onTapped == null) Modifier else Modifier.clickable { onTapped.invoke() },
             factory = { context ->
-                player.attachContext(context)
+                player.attachContext(context, softwareDecodingEnabled)
                 NexaPlayerView(context).apply {
                     useController = controls
                     this.player = player.nativePlayer

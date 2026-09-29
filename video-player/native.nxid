@@ -38,5 +38,6 @@ native component VideoView {
     content
     prop player: VideoPlayer
     prop controls: Bool = true
+    prop softwareDecodingEnabled: Bool = true
     event tapped()
 }

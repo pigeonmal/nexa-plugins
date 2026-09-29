@@ -9,13 +9,6 @@ plugin {
         minVersion: "17.0"
         sources: ["ios/Sources/**/*.swift"]
         frameworks: ["AVFoundation", "AVKit"]
-        dependencies {
-            swiftPackage {
-                url: "https://github.com/kingslay/KSPlayer.git"
-                revision: "92c18fae716f63a080541c4bcc77247ade181426"
-                products: ["KSPlayer"]
-            }
-        }
     }
     android {
         minSdk: 23

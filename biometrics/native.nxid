@@ -1,0 +1,22 @@
+// Starts authentication only from a user-triggered native control. Outcomes
+// are typed so apps can distinguish enrollment, cancellation, and lockout.
+enum BiometricFailure {
+    notAvailable
+    notEnrolled
+    lockout
+    userCanceled
+    systemCanceled
+    authenticationFailed
+    passcodeNotSet
+    invalidContext
+    unknown
+}
+
+/// Opens the native biometric prompt only after the user presses its button.
+/// Dismissing this component cancels an in-flight prompt.
+native component BiometricButton {
+    prop title: String
+    prop reason: String
+    event authenticated()
+    event failed(error: BiometricFailure)
+}

@@ -1,0 +1,30 @@
+plugin "../../../" as Biometrics
+
+app BiometricsDemo {
+    state authenticated = false
+    state failed = false
+
+    body {
+        Column(spacing: 12, padding: 20) {
+            Text("Biometric authentication")
+            Biometrics.BiometricButton(
+                title: "Authenticate",
+                reason: "Confirm your identity to continue"
+            )
+                .onAuthenticated {
+                    authenticated = true
+                    failed = false
+                }
+                .onFailed { error ->
+                    authenticated = false
+                    failed = true
+                }
+            if authenticated {
+                Text("Authenticated")
+            }
+            if failed {
+                Text("Authentication was not completed")
+            }
+        }
+    }
+}

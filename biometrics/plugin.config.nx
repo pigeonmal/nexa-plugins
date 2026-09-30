@@ -1,0 +1,21 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.biometrics"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "13.0"
+        sources: ["ios/Sources/**/*.swift"]
+        frameworks: ["LocalAuthentication"]
+        usageDescriptions {
+            NSFaceIDUsageDescription: "Use Face ID to confirm your identity."
+        }
+    }
+    android {
+        minSdk: 28
+        sources: ["android/src/main/kotlin/**/*.kt"]
+        permissions: ["android.permission.USE_BIOMETRIC"]
+    }
+}

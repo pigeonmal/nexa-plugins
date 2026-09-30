@@ -1,0 +1,4 @@
+/.nexa/
+/build/
+/tests/demo/app/.nexa/
+/tests/demo/app/build/

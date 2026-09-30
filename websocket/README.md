@@ -80,3 +80,15 @@ app Chat {
   higher of the app and plugin requirements. The dependency is Apache-2.0.
 - One shared OkHttp client reuses its dispatcher and connection pool. Each
   `WebSocket` owns its connection, callbacks, and close lifecycle.
+
+## DevRuntime and imported screens
+
+The demo keeps the socket screen in `tests/demo/app/screens/Chat.nx` and imports
+it from `App.nx`. Nexa's development host links configured plugin adapters up
+front, so edits or newly imported `.nx` screens can use an already configured
+WebSocket plugin through hot reload. The `.nx` source is compiled into the app
+and is not copied into the generated native app bundle.
+
+Changes to the plugin's native sources or contract, adding a plugin dependency,
+or changing platform permissions and minimum versions changes the native host
+and requires a rebuild.

@@ -5,7 +5,7 @@ config {
         buildNumber: 1,
     }
     ios {
-        minVersion: "15.0",
+        minVersion: "16.0",
         bundleIdentifier: "dev.nexa.websocket.demo",
     }
     android {

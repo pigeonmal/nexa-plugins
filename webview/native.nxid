@@ -1,0 +1,12 @@
+// A constrained, native WebKit/Android WebView surface.
+// JavaScript stays disabled unless the app opts in. Messaging is confined to
+// exact allowlisted HTTPS origins and uses the same API on both platforms.
+native component BrowserView {
+    prop url: String
+    prop javaScriptEnabled: Bool = false
+    prop allowedMessageOrigins: Array<String>
+    prop message: String?
+    event messageReceived(message: String)
+    event navigated(url: String)
+    event failed(message: String)
+}

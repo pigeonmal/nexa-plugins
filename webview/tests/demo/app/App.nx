@@ -1,0 +1,32 @@
+plugin "../../../" as WebView
+
+app WebViewDemo {
+    state outgoingMessage = "First Nexa message"
+    state incomingMessage = "No message received"
+    state currentUrl = ""
+    state failure = ""
+
+    body {
+        Column {
+            WebView.BrowserView(
+                url: "https://example.com",
+                javaScriptEnabled: true,
+                allowedMessageOrigins: ["https://example.com"],
+                message: outgoingMessage,
+            ).onMessageReceived { value ->
+                incomingMessage = value
+            }.onNavigated { url ->
+                currentUrl = url
+            }.onFailed { message ->
+                failure = message
+            }
+
+            Button("Send another message") {
+                outgoingMessage = "Second Nexa message"
+            }
+            Text(currentUrl)
+            Text(incomingMessage)
+            Text(failure)
+        }
+    }
+}

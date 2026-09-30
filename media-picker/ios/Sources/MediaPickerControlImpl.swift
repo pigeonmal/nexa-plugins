@@ -3,24 +3,31 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-private struct PickedMovie: Transferable {
+private struct PickedMedia: Transferable {
     let url: URL
 
     static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(importedContentType: .movie) { received in
-            let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("NexaMediaPicker", isDirectory: true)
-            try FileManager.default.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true
-            )
-            let fileExtension = received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension
-            let destination = directory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension(fileExtension)
-            try FileManager.default.copyItem(at: received.file, to: destination)
-            return PickedMovie(url: destination)
+        FileRepresentation(importedContentType: .image) { received in
+            try importFile(received.file)
         }
+        FileRepresentation(importedContentType: .movie) { received in
+            try importFile(received.file)
+        }
+    }
+
+    private static func importFile(_ source: URL) throws -> PickedMedia {
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("NexaMediaPicker", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let fileExtension = source.pathExtension.isEmpty ? "media" : source.pathExtension
+        let destination = directory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(fileExtension)
+        try FileManager.default.copyItem(at: source, to: destination)
+        return PickedMedia(url: destination)
     }
 }
 
@@ -67,36 +74,14 @@ public struct MediaPickerControlImpl<Content: View>: View {
     @MainActor
     private func importSelection(_ item: PhotosPickerItem) async {
         do {
-            if isVideo {
-                guard let movie = try await item.loadTransferable(type: PickedMovie.self) else {
-                    throw MediaPickerFailure.unreadableSelection
-                }
-                onPicked?(movie.url.absoluteString)
-            } else {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
-                    throw MediaPickerFailure.unreadableSelection
-                }
-                let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "img"
-                let url = try cacheDirectory()
-                    .appendingPathComponent(UUID().uuidString)
-                    .appendingPathExtension(fileExtension)
-                try data.write(to: url, options: .atomic)
-                onPicked?(url.absoluteString)
+            guard let media = try await item.loadTransferable(type: PickedMedia.self) else {
+                throw MediaPickerFailure.unreadableSelection
             }
+            onPicked?(media.url.absoluteString)
         } catch {
             onFailed?(error.localizedDescription)
         }
         selection = nil
-    }
-
-    private func cacheDirectory() throws -> URL {
-        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("NexaMediaPicker", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        return directory
     }
 }
 

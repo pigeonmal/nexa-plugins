@@ -8,9 +8,14 @@ plugin {
     ios {
         minVersion: "17.0"
         sources: ["ios/Sources/**/*.swift"]
+        frameworks: ["CoreMotion"]
+        usageDescriptions {
+            NSMotionUsageDescription: "Motion data is used to provide the pedometer and fitness features you start."
+        }
     }
     android {
         minSdk: 26
         sources: ["android/src/main/kotlin/**/*.kt"]
+        permissions: ["android.permission.ACTIVITY_RECOGNITION"]
     }
 }

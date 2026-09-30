@@ -1,0 +1,75 @@
+plugin "../../../" as Sensors
+
+app SensorsDemo {
+    let sensors = Sensors()
+    state accelerationX = 0.0
+    state rotationZ = 0.0
+    state steps: Int64 = 0
+    state sensorError = ""
+
+    body {
+        OnAppear async {
+            sensors.accelerometerChanged { reading ->
+                accelerationX = reading.x
+            }
+            sensors.gyroscopeChanged { reading ->
+                rotationZ = reading.z
+            }
+            sensors.stepsChanged { reading ->
+                steps = reading.steps
+            }
+
+            try {
+                await sensors.startAccelerometer(50)
+                await sensors.startGyroscope(50)
+            } catch {
+                case Sensors.SensorError.accelerometerUnavailable {
+                    sensorError = "Accelerometer unavailable"
+                }
+                case Sensors.SensorError.gyroscopeUnavailable {
+                    sensorError = "Gyroscope unavailable"
+                }
+                case Sensors.SensorError.invalidInterval(intervalMs) {
+                    sensorError = "Invalid sampling interval: \(intervalMs)"
+                }
+                case Sensors.SensorError.disposed {
+                    sensorError = "Sensor was disposed"
+                }
+                else {
+                    sensorError = "Motion sensor could not start"
+                }
+            }
+
+            if await Permissions.request(permission: Motion) == PermissionStatus.granted {
+                try {
+                    await sensors.startPedometer()
+                } catch {
+                    case Sensors.SensorError.pedometerUnavailable {
+                        sensorError = "Pedometer unavailable"
+                    }
+                    case Sensors.SensorError.permissionNotGranted {
+                        sensorError = "Motion permission not granted"
+                    }
+                    case Sensors.SensorError.invalidInterval(intervalMs) {
+                        sensorError = "Invalid sampling interval: \(intervalMs)"
+                    }
+                    case Sensors.SensorError.disposed {
+                        sensorError = "Sensor was disposed"
+                    }
+                    else {
+                        sensorError = "Pedometer could not start"
+                    }
+                }
+            }
+        }
+        OnDisappear {
+            sensors.dispose()
+        }
+        Column {
+            Text("Acceleration X: \(accelerationX) m/s²")
+            Text("Rotation Z: \(rotationZ) rad/s")
+            Text("Steps: \(steps)")
+            Text(sensorError)
+        }
+    }
+}

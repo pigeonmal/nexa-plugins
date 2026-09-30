@@ -1,0 +1,20 @@
+config {
+    app {
+        displayName: "SensorsDemo",
+        version: "1.0.0",
+        buildNumber: 1,
+    }
+    ios {
+        minVersion: "17.0",
+        bundleIdentifier: "dev.nexa.sensors.demo",
+    }
+    android {
+        minSdk: 26,
+        targetSdk: 36,
+        applicationId: "dev.nexa.sensors.demo",
+    }
+    plugins {
+        Sensors {
+        }
+    }
+}

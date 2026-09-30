@@ -1,11 +1,48 @@
-// Typed native contract for `dev.nexa.sensors`.
-//
-// Structs, enums, and error types become Swift types and Kotlin
-// classes. `native class` declarations become direct contracts:
-// implement `SensorsImpl` and the compiler aliases `Sensors` to it.
+// Native motion sensors with stable units across iOS and Android.
+// Vector timestamps use Unix epoch seconds. Accelerometer values are m/s²;
+// gyroscope values are radians/second. Pedometer readings count steps since
+// this Sensors instance started collecting.
+
+struct MotionReading {
+    x: Float64
+    y: Float64
+    z: Float64
+    timestampUnixSeconds: Float64
+}
+
+struct PedometerReading {
+    steps: Int64
+    timestampUnixSeconds: Float64
+}
+
+error SensorError {
+    accelerometerUnavailable
+    gyroscopeUnavailable
+    pedometerUnavailable
+    permissionNotGranted
+    invalidInterval(intervalMs: Int32)
+    disposed
+}
 
 native class Sensors {
     init()
 
+    readonly property accelerometerAvailable: Bool
+    readonly property gyroscopeAvailable: Bool
+    readonly property pedometerAvailable: Bool
+
+    async fn startAccelerometer(intervalMs: Int32) throws SensorError
+    fn stopAccelerometer()
+
+    async fn startGyroscope(intervalMs: Int32) throws SensorError
+    fn stopGyroscope()
+
+    async fn startPedometer() throws SensorError
+    fn stopPedometer()
+
     fn dispose()
+
+    event accelerometerChanged(reading: MotionReading)
+    event gyroscopeChanged(reading: MotionReading)
+    event stepsChanged(reading: PedometerReading)
 }

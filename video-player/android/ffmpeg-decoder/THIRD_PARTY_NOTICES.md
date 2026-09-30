@@ -13,6 +13,11 @@ under LGPL 2.1 or later. The build script checks those configure flags and
 includes the exact build configuration in the generated AAR at
 `assets/nexa/ffmpeg-build.txt`.
 
+When redistributing an application that contains these shared libraries, make
+the matching source archive and build recipe available with the application,
+and retain the FFmpeg notices. The archive is unmodified upstream source; its
+SHA-256 and configure options are recorded in the AAR build metadata.
+
 The pixel conversion library is libyuv from Chromium's libyuv repository at
 commit `b25fa8992056629c99d7815516e7be6b82509897`. It is licensed under the
 BSD 3-Clause license; see `LIBYUV-LICENSE.txt`.

@@ -57,8 +57,8 @@ app MmkvConformance {
     state selectedTab: Int32 = 0
     state stringReadNs: Int64 = 0
     state stringWriteNs: Int64 = 0
-    state stringCompareWriteNs: Int64 = 0
-    state stringCompareBeforeSetEnabled: Bool = false
+    state stringWriteWithoutComparisonNs: Int64 = 0
+    state compareBeforeSetDisabled: Bool = false
     state intReadNs: Int64 = 0
     state intWriteNs: Int64 = 0
     state listReadNs: Int64 = 0
@@ -87,7 +87,8 @@ app MmkvConformance {
                     Text("String benchmarks use an unencrypted single-process store and reuse one key and value; setup and warm-up are excluded.")
 
                     Button("Benchmark strings (1,000)") {
-                        benchmarkStore.disableCompareBeforeSet()
+                        benchmarkStore.enableCompareBeforeSet()
+                        benchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         for index in 0..<10 {
                             benchmarkStore.getString(benchmarkStringKey)
                             benchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
@@ -110,7 +111,8 @@ app MmkvConformance {
                         }
                         stringReadNs = Time.elapsed(since: benchmarkStartedAt)
 
-                        stringCompareBeforeSetEnabled = compareBenchmarkStore.enableCompareBeforeSet()
+                        compareBenchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
+                        compareBeforeSetDisabled = compareBenchmarkStore.disableCompareBeforeSet()
                         for index in 0..<10 {
                             compareBenchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         }
@@ -118,11 +120,11 @@ app MmkvConformance {
                         for index in 0..<1000 {
                             compareBenchmarkStore.setString(benchmarkStringKey, benchmarkStringValue)
                         }
-                        stringCompareWriteNs = Time.elapsed(since: benchmarkStartedAt)
-                        Log.info(message: "MMKV string read: $stringReadNs ns; write with comparison disabled: $stringWriteNs ns; unchanged write with compare-before-set ($stringCompareBeforeSetEnabled): $stringCompareWriteNs ns")
+                        stringWriteWithoutComparisonNs = Time.elapsed(since: benchmarkStartedAt)
+                        Log.info(message: "MMKV string read: $stringReadNs ns; write with compare-before-set: $stringWriteNs ns; write without comparison: $stringWriteWithoutComparisonNs ns (disable accepted: $compareBeforeSetDisabled)")
                     }
-                    Text("String read: $stringReadNs ns; write with comparison disabled: $stringWriteNs ns")
-                    Text("Unchanged value with compare-before-set: $stringCompareWriteNs ns (enabled: $stringCompareBeforeSetEnabled)")
+                    Text("String read: $stringReadNs ns; write with compare-before-set: $stringWriteNs ns")
+                    Text("Write without comparison: $stringWriteWithoutComparisonNs ns (disabled: $compareBeforeSetDisabled)")
 
                     Button("Benchmark Int32 (1,000)") {
                         benchmarkGeneration = benchmarkGeneration + 1

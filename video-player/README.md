@@ -20,6 +20,14 @@ shared libraries; its source archive, configure checks, and notices are under
 Cronet provider for media requests and shares its Cronet engine between player
 instances.
 
+The FFmpeg fallback uses the upstream LGPL 2.1-or-later license, not NextLib or
+GPL FFmpeg components. The wrapper code is Apache-2.0. App distributors that
+ship the Android decoder binaries must include the required notices and make
+the corresponding FFmpeg source and build information available. The exact
+unmodified FFmpeg source archive and build recipe are included under
+`android/ffmpeg-decoder`; see its third-party notices and the
+[FFmpeg licensing guidance](https://ffmpeg.org/legal.html).
+
 On Android 8.0 and later, PiP starts when the user backgrounds the app while
 exactly one attached video player is actively playing. Android 12 and later use
 the system's automatic home gesture transition; Android 8.0 through 11 enter

@@ -91,7 +91,7 @@ Source: https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz
 Configure: --disable-gpl --disable-version3 --disable-nonfree --disable-autodetect --disable-avformat
 Enabled decoders: h264 hevc vp8 vp9 av1 mpeg2video mpeg4 prores aac mp3 opus flac vorbis ac3 eac3
 Verified configuration for each ABI: CONFIG_GPL=0 CONFIG_GPLV3=0 CONFIG_VERSION3=0 CONFIG_NONFREE=0 in config.h
-Android NDK: ${NDK_DIR}
+Android NDK version: ${ANDROID_NDK_VERSION}
 libyuv commit: ${LIBYUV_COMMIT}
 The libraries are separate shared objects; see the LGPL and BSD notices in assets/nexa/licenses.
 EOF

@@ -75,11 +75,13 @@ app Chat {
 
 - iOS uses `URLSessionWebSocketTask` and callback-based APIs, so the plugin keeps
   its iOS deployment minimum at 13.0.
+- iOS reuses one `URLSession` for plugin sockets and routes delegate callbacks by
+  task identifier. Each socket still owns and removes its callbacks and task.
 - Android uses the isolated OkHttp WebSocket client dependency, version 5.5.0,
   with Android API 21 or later. The app's effective minimum API remains the
   higher of the app and plugin requirements. The dependency is Apache-2.0.
-- One shared OkHttp client reuses its dispatcher and connection pool. Each
-  `WebSocket` owns its connection, callbacks, and close lifecycle.
+- One shared OkHttp client reuses its dispatcher and configuration. Each
+  `WebSocket` owns its upgraded connection, callbacks, and close lifecycle.
 
 ## DevRuntime and imported screens
 

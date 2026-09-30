@@ -1,18 +1,47 @@
 import Foundation
 
-private final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
-    private let onOpen: @Sendable () -> Void
-    private let onClose: @Sendable () -> Void
-    private let onFailure: @Sendable (String) -> Void
+private struct WebSocketTaskCallbacks: @unchecked Sendable {
+    let onOpen: @Sendable () -> Void
+    let onClose: @Sendable () -> Void
+    let onFailure: @Sendable (String) -> Void
+}
 
-    init(
-        onOpen: @escaping @Sendable () -> Void,
-        onClose: @escaping @Sendable () -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) {
-        self.onOpen = onOpen
-        self.onClose = onClose
-        self.onFailure = onFailure
+/// Owns one URLSession for the plugin and routes delegate callbacks by task.
+/// Keeping callbacks per task preserves socket ownership while avoiding a
+/// separate URLSession and delegate allocation for every WebSocket instance.
+private final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+    static let shared = WebSocketSessionDelegate()
+
+    private let lock = NSLock()
+    private var callbacksByTask: [Int: WebSocketTaskCallbacks] = [:]
+    private lazy var session = URLSession(
+        configuration: .default,
+        delegate: self,
+        delegateQueue: nil
+    )
+
+    private override init() {
+        super.init()
+    }
+
+    func makeTask(url: URL, callbacks: WebSocketTaskCallbacks) -> URLSessionWebSocketTask {
+        let task = session.webSocketTask(with: url)
+        lock.lock()
+        callbacksByTask[task.taskIdentifier] = callbacks
+        lock.unlock()
+        return task
+    }
+
+    func removeCallbacks(for taskIdentifier: Int) {
+        lock.lock()
+        callbacksByTask.removeValue(forKey: taskIdentifier)
+        lock.unlock()
+    }
+
+    private func callbacks(for taskIdentifier: Int) -> WebSocketTaskCallbacks? {
+        lock.lock()
+        defer { lock.unlock() }
+        return callbacksByTask[taskIdentifier]
     }
 
     func urlSession(
@@ -20,7 +49,7 @@ private final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDeleg
         webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol subprotocol: String?
     ) {
-        onOpen()
+        callbacks(for: webSocketTask.taskIdentifier)?.onOpen()
     }
 
     func urlSession(
@@ -29,12 +58,12 @@ private final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDeleg
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
-        onClose()
+        callbacks(for: webSocketTask.taskIdentifier)?.onClose()
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let error else { return }
-        onFailure(error.localizedDescription)
+        callbacks(for: task.taskIdentifier)?.onFailure(error.localizedDescription)
     }
 }
 
@@ -47,8 +76,6 @@ public final class WebSocketImpl: WebSocketSpec {
     public var onFailed: ((String) -> Void)?
 
     private let urlString: String
-    private var session: URLSession?
-    private var sessionDelegate: WebSocketSessionDelegate?
     private var socket: URLSessionWebSocketTask?
     private var isDisposed = false
 
@@ -70,31 +97,26 @@ public final class WebSocketImpl: WebSocketSpec {
             throw .invalidUrl
         }
 
-        let delegate = WebSocketSessionDelegate(
-            onOpen: { [weak self] in
-                Task { @MainActor [weak self] in
-                    self?.setState(.open)
+        let socket = WebSocketSessionDelegate.shared.makeTask(
+            url: url,
+            callbacks: WebSocketTaskCallbacks(
+                onOpen: { [weak self] in
+                    Task { @MainActor [weak self] in
+                        self?.setState(.open)
+                    }
+                },
+                onClose: { [weak self] in
+                    Task { @MainActor [weak self] in
+                        self?.didClose()
+                    }
+                },
+                onFailure: { [weak self] message in
+                    Task { @MainActor [weak self] in
+                        self?.fail(message: message)
+                    }
                 }
-            },
-            onClose: { [weak self] in
-                Task { @MainActor [weak self] in
-                    self?.didClose()
-                }
-            },
-            onFailure: { [weak self] message in
-                Task { @MainActor [weak self] in
-                    self?.fail(message: message)
-                }
-            }
+            )
         )
-        let session = URLSession(
-            configuration: .default,
-            delegate: delegate,
-            delegateQueue: nil
-        )
-        let socket = session.webSocketTask(with: url)
-        self.sessionDelegate = delegate
-        self.session = session
         self.socket = socket
         setState(.connecting)
         socket.resume()
@@ -138,11 +160,11 @@ public final class WebSocketImpl: WebSocketSpec {
     public func dispose() {
         guard !isDisposed else { return }
         isDisposed = true
+        if let socket {
+            WebSocketSessionDelegate.shared.removeCallbacks(for: socket.taskIdentifier)
+        }
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
-        session?.invalidateAndCancel()
-        session = nil
-        sessionDelegate = nil
         state = .closed
         onStateChanged = nil
         onMessageReceived = nil
@@ -182,19 +204,19 @@ public final class WebSocketImpl: WebSocketSpec {
     private func didClose() {
         guard !isDisposed, state != .closed else { return }
         setState(.closed)
-        session?.finishTasksAndInvalidate()
-        session = nil
-        sessionDelegate = nil
+        if let socket {
+            WebSocketSessionDelegate.shared.removeCallbacks(for: socket.taskIdentifier)
+        }
         socket = nil
     }
 
     private func fail(message: String) {
         guard !isDisposed, state != .failed, state != .closed else { return }
+        if let socket {
+            WebSocketSessionDelegate.shared.removeCallbacks(for: socket.taskIdentifier)
+        }
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
-        session?.invalidateAndCancel()
-        session = nil
-        sessionDelegate = nil
         setState(.failed)
         onFailed?(message)
     }

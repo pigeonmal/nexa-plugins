@@ -10,6 +10,7 @@ Official plugin packages for [Nexa](https://github.com/pigeonmal/nexa).
 | [`@nexa/audio-player`](audio-player) | Background audio playback, track metadata, and system media controls on iOS and Android |
 | [`@nexa/mmkv`](mmkv) | Synchronous key-value storage over MMKV, with encryption, typed generics, and change listeners |
 | [`@nexa/sensors`](sensors) | Accelerometer, gyroscope, and pedometer readings with typed events on iOS and Android |
+| [`@nexa/websocket`](websocket) | Native text and binary WebSockets over URLSession and OkHttp |
 
 ## License
 

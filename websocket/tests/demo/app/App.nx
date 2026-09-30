@@ -1,0 +1,53 @@
+plugin "../../../" as WebSocket
+
+app WebSocketDemo {
+    let socket = WebSocket.WebSocket("wss://echo.websocket.events")
+    state message = "Hello from Nexa"
+    state received = ""
+    state connection = "Idle"
+    state failure = ""
+
+    body {
+        OnAppear async {
+            socket.stateChanged { current ->
+                connection = "Connection state changed"
+            }
+            socket.messageReceived { text ->
+                received = text
+            }
+            socket.binaryReceived { bytes ->
+                connection = "Binary message received"
+            }
+            socket.failed { error ->
+                failure = error
+            }
+            try {
+                await socket.connect()
+            } catch {
+                case WebSocket.WebSocketError.invalidUrl {
+                    failure = "The WebSocket URL is invalid."
+                }
+                case WebSocket.WebSocketError.alreadyConnected {
+                    failure = "This WebSocket was already started."
+                }
+            }
+        }
+
+        OnDisappear {
+            socket.dispose()
+        }
+
+        Column(spacing: 12) {
+            Text(connection)
+            Text(received)
+            Text(failure)
+            Button("Send") {
+                if (socket.send(message)) {
+                    connection = "Message queued"
+                } else {
+                    connection = "Not connected"
+                }
+            }
+        }
+    }
+}

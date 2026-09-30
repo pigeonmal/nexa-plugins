@@ -1,0 +1,36 @@
+// Standard text and binary WebSockets, implemented with native platform clients.
+enum WebSocketState {
+    idle
+    connecting
+    open
+    closing
+    closed
+    failed
+}
+
+error WebSocketError {
+    invalidUrl
+    alreadyConnected
+}
+
+native class WebSocket {
+    init(url: String)
+
+    readonly property state: WebSocketState
+
+    /// Starts one connection. Handshake success and failure arrive as state events.
+    async fn connect() throws WebSocketError
+
+    /// Returns false unless the socket is open or the platform send queue rejects the message.
+    fn send(text: String) -> Bool
+    fn sendBytes(bytes: Bytes) -> Bool
+
+    /// Starts a normal RFC 6455 close handshake.
+    fn close()
+    fn dispose()
+
+    event stateChanged(state: WebSocketState)
+    event messageReceived(text: String)
+    event binaryReceived(bytes: Bytes)
+    event failed(message: String)
+}

@@ -5,6 +5,7 @@ import com.tencent.mmkv.MMKVHandler
 import com.tencent.mmkv.MMKVLogLevel
 import com.tencent.mmkv.MMKVRecoverStrategic
 import dev.nexa.core.NexaRuntimeCore
+import dev.nexa.core.NexaValueReadResult
 import dev.nexa.core.NexaValueReader
 import dev.nexa.core.NexaValueWriter
 import java.util.concurrent.ConcurrentHashMap
@@ -143,9 +144,9 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <T> getObject(key: String, decode: (NexaValueReader) -> T?): T? {
+    override fun <T> getObject(key: String, decode: (NexaValueReader) -> NexaValueReadResult<T>): T? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data))
+        return decode(NexaValueReader(data)).valueOrNull()
     }
 
     override fun <T> setList(
@@ -158,9 +159,9 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <T> getList(key: String, decode: (NexaValueReader) -> List<T>?): List<T>? {
+    override fun <T> getList(key: String, decode: (NexaValueReader) -> NexaValueReadResult<List<T>>): List<T>? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data))
+        return decode(NexaValueReader(data)).valueOrNull()
     }
 
     override fun <T> setSet(
@@ -173,9 +174,9 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <T> getSet(key: String, decode: (NexaValueReader) -> Set<T>?): Set<T>? {
+    override fun <T> getSet(key: String, decode: (NexaValueReader) -> NexaValueReadResult<Set<T>>): Set<T>? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data))
+        return decode(NexaValueReader(data)).valueOrNull()
     }
 
     override fun <K, V> setMap(
@@ -188,9 +189,9 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <K, V> getMap(key: String, decode: (NexaValueReader) -> Map<K, V>?): Map<K, V>? {
+    override fun <K, V> getMap(key: String, decode: (NexaValueReader) -> NexaValueReadResult<Map<K, V>>): Map<K, V>? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data))
+        return decode(NexaValueReader(data)).valueOrNull()
     }
 
     // MARK: - Key space

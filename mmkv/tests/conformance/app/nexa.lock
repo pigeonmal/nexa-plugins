@@ -1,6 +1,6 @@
 {
   "version": 1,
   "plugins": [
-    {"alias":"MMKV","id":"dev.nexa.mmkv","source":"path:../../..","revision":null,"package":null,"contentHash":"9782b08fb345e764"}
+    {"alias":"MMKV","id":"dev.nexa.mmkv","source":"path:../../..","revision":null,"package":null,"contentHash":"432963b88c0ad904"}
   ]
 }

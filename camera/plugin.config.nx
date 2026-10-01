@@ -1,0 +1,32 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.camera"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "17.0"
+        sources: ["ios/Sources/**/*.swift"]
+        frameworks: ["AVFoundation"]
+        usageDescriptions {
+            NSCameraUsageDescription: "Use the camera features you open in this app."
+            NSMicrophoneUsageDescription: "Record audio when you start a camera video recording with audio enabled."
+        }
+    }
+    android {
+        minSdk: 23
+        sources: ["android/src/main/kotlin/**/*.kt"]
+        dependencies: [
+            "androidx.camera:camera-camera2:1.6.2",
+            "androidx.camera:camera-lifecycle:1.6.2",
+            "androidx.camera:camera-view:1.6.2",
+            "androidx.camera:camera-video:1.6.2",
+            "com.google.mlkit:barcode-scanning:17.3.0",
+        ]
+        permissions: [
+            "android.permission.CAMERA",
+            "android.permission.RECORD_AUDIO",
+        ]
+    }
+}

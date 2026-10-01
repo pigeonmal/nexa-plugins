@@ -1,0 +1,73 @@
+// Lifecycle-scoped camera preview, capture, scanning, and throttled raw frames.
+enum CameraFacing {
+    back
+    front
+}
+
+enum CameraBarcodeFormat {
+    aztec
+    codabar
+    code39
+    code93
+    code128
+    dataMatrix
+    ean8
+    ean13
+    itf
+    pdf417
+    qr
+    upcA
+    upcE
+}
+
+enum CameraFrameResolution {
+    vga
+    hd
+}
+
+struct CameraBarcode {
+    value: String
+    format: CameraBarcodeFormat
+}
+
+// `pixels` is tightly packed I420: Y followed by U then V. Chroma dimensions
+// are ceil(width / 2) by ceil(height / 2). Rotation is metadata, not applied
+// to the pixels. The native capture frame is released after this event returns.
+struct CameraFrame {
+    sequence: Int64
+    width: Int32
+    height: Int32
+    rotationDegrees: Int32
+    presentationTimeNanoseconds: Int64
+    pixels: Bytes
+}
+
+error CameraError {
+    cameraPermissionDenied
+    microphonePermissionDenied
+    cameraUnavailable
+    captureFailed(message: String)
+    recordingFailed(message: String)
+    invalidFrameRate(frameRate: Int32)
+}
+
+// The preview owns the capture session. Leaving composition stops the camera,
+// analysis, and any active recording. Increment photoRequestId to capture a
+// photo; toggle recording to start/stop a movie.
+native component CameraView {
+    prop facing: CameraFacing
+    prop photoRequestId: Int32 = 0
+    prop recording: Bool = false
+    prop recordAudio: Bool = false
+    prop imageStreamEnabled: Bool = false
+    prop barcodeScanningEnabled: Bool = false
+    prop barcodeFormat: CameraBarcodeFormat
+    prop frameResolution: CameraFrameResolution
+    prop maxFramesPerSecond: Int32 = 10
+
+    event photoCaptured(uri: String)
+    event videoCaptured(uri: String)
+    event barcodeDetected(barcode: CameraBarcode)
+    event frameAvailable(frame: CameraFrame)
+    event failed(error: CameraError)
+}

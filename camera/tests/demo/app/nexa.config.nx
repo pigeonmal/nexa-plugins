@@ -1,0 +1,16 @@
+config {
+    app {
+        displayName: "CameraDemo",
+        version: "1.0.0",
+        buildNumber: 1,
+    }
+    ios {
+        minVersion: "17.0",
+        bundleIdentifier: "dev.nexa.camera.demo",
+    }
+    android {
+        minSdk: 23,
+        targetSdk: 36,
+        applicationId: "dev.nexa.camera.demo",
+    }
+}

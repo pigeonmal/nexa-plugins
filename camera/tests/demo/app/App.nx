@@ -1,0 +1,45 @@
+plugin "../../../" as Camera
+
+app CameraDemo {
+    state photoRequestId: Int32 = 0
+    state recording = false
+    state imageStreamEnabled = false
+    state photoUri = ""
+    state videoUri = ""
+    state barcodeValue = ""
+    state frameSequence: Int64 = 0
+    state cameraFailure = ""
+
+    body {
+        Column(spacing: 12, padding: 16) {
+            Camera.CameraView(
+                facing: Camera.CameraFacing.back,
+                photoRequestId: photoRequestId,
+                recording: recording,
+                imageStreamEnabled: imageStreamEnabled,
+                barcodeScanningEnabled: true,
+                barcodeFormat: Camera.CameraBarcodeFormat.qr,
+                frameResolution: Camera.CameraFrameResolution.vga,
+                maxFramesPerSecond: 10,
+            )
+                .onPhotoCaptured { uri -> photoUri = uri }
+                .onVideoCaptured { uri -> videoUri = uri }
+                .onBarcodeDetected { barcode -> barcodeValue = barcode.value }
+                .onFrameAvailable { frame -> frameSequence = frame.sequence }
+                .onFailed { error -> cameraFailure = "Camera operation failed" }
+
+            Button("Take photo") { photoRequestId += 1 }
+            Button("Toggle video recording") {
+                recording = !recording
+            }
+            Button("Toggle image stream") {
+                imageStreamEnabled = !imageStreamEnabled
+            }
+            Text(photoUri)
+            Text(videoUri)
+            Text(barcodeValue)
+            Text("Frame: \(frameSequence)")
+            Text(cameraFailure)
+        }
+    }
+}

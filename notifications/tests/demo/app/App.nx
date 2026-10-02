@@ -108,33 +108,29 @@ app NotificationsDemo {
             }
             Button("Register for remote notifications") {
                 Task.launch(handle: remoteTask, executor: TaskExecutor.Main) {
-                    if await Permissions.request(permission: Notifications) != PermissionStatus.granted {
-                        status = "Grant notification permission first."
-                    } else {
-                        try {
-                            await notifications.registerRemote()
-                            status = "Remote notification token registered."
-                            Log.info(message: "NEXA_NOTIFICATIONS_APNS_TOKEN_REGISTERED")
-                        } catch {
-                            case Notifications.NotificationError.permissionDenied {
-                                status = "Grant notification permission first."
-                            }
-                            case Notifications.NotificationError.invalidIdentifier {
-                                status = "Notification identifier is empty."
-                            }
-                            case Notifications.NotificationError.invalidDelay {
-                                status = "Notification delay must be non-negative."
-                            }
-                            case Notifications.NotificationError.schedulerUnavailable {
-                                status = "Notification scheduler is unavailable."
-                            }
-                            case Notifications.NotificationError.firebaseNotConfigured {
-                                status = "Android Firebase options are missing."
-                            }
-                            case Notifications.NotificationError.remoteRegistrationUnavailable {
-                                status = "Remote notification registration failed."
-                                Log.info(message: "NEXA_NOTIFICATIONS_APNS_TOKEN_REGISTRATION_FAILED")
-                            }
+                    try {
+                        await notifications.registerRemote()
+                        status = "Remote notification token registered."
+                        Log.info(message: "NEXA_NOTIFICATIONS_APNS_TOKEN_REGISTERED")
+                    } catch {
+                        case Notifications.NotificationError.permissionDenied {
+                            status = "Remote registration was denied."
+                        }
+                        case Notifications.NotificationError.invalidIdentifier {
+                            status = "Notification identifier is empty."
+                        }
+                        case Notifications.NotificationError.invalidDelay {
+                            status = "Notification delay must be non-negative."
+                        }
+                        case Notifications.NotificationError.schedulerUnavailable {
+                            status = "Notification scheduler is unavailable."
+                        }
+                        case Notifications.NotificationError.firebaseNotConfigured {
+                            status = "Android Firebase options are missing."
+                        }
+                        case Notifications.NotificationError.remoteRegistrationUnavailable {
+                            status = "Remote notification registration failed."
+                            Log.info(message: "NEXA_NOTIFICATIONS_APNS_TOKEN_REGISTRATION_FAILED")
                         }
                     }
                 }

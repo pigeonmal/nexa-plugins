@@ -569,12 +569,20 @@ private final class CameraCaptureEngine: NSObject, @unchecked Sendable,
         for metadata in metadataObjects {
             guard let code = metadata as? AVMetadataMachineReadableCodeObject,
                   let value = code.stringValue,
-                  let format = code.type.toNexaFormat,
+                  let format = code.type.toNexaFormat(selectedFormat: configuration.barcodeFormat),
                   format == configuration.barcodeFormat else { continue }
-            if value == lastBarcodeValue, now &- lastBarcodeDispatchNanos < 1_000_000_000 { continue }
-            lastBarcodeValue = value
+            // AVFoundation pads UPC-A symbols with a leading zero and reports
+            // them as EAN-13. Match Android's 12-digit UPC-A payload.
+            let normalizedValue: String
+            if code.type == .ean13, format == .upcA, value.count == 13, value.first == "0" {
+                normalizedValue = String(value.dropFirst())
+            } else {
+                normalizedValue = value
+            }
+            if normalizedValue == lastBarcodeValue, now &- lastBarcodeDispatchNanos < 1_000_000_000 { continue }
+            lastBarcodeValue = normalizedValue
             lastBarcodeDispatchNanos = now
-            callbackBox.emitBarcode(CameraBarcode(value: value, format: format))
+            callbackBox.emitBarcode(CameraBarcode(value: normalizedValue, format: format))
         }
     }
 
@@ -644,7 +652,10 @@ private extension CameraBarcodeFormat {
 }
 
 private extension AVMetadataObject.ObjectType {
-    var toNexaFormat: CameraBarcodeFormat? {
+    func toNexaFormat(selectedFormat: CameraBarcodeFormat) -> CameraBarcodeFormat? {
+        // AVFoundation reports UPC-A symbols as EAN-13 metadata. Preserve the
+        // requested Nexa format so UPC-A scanning works like the Android API.
+        if self == .ean13, selectedFormat == .upcA { return .upcA }
         switch self {
         case .aztec: .aztec
         case .codabar: .codabar

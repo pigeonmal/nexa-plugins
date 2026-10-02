@@ -49,13 +49,15 @@ native `UNTimeIntervalNotificationTrigger`. A delay of zero requests immediate
 delivery on iOS and the earliest WorkManager execution on Android.
 
 Call `Permissions.request(permission: Notifications)` from a user action before
-scheduling on Android 13 and later or on iOS. The plugin does not display its
-own permission prompt. Apps may also check the permission status through the
-core `PermissionStatus` API.
+scheduling visible notifications on Android 13 and later or on iOS. The plugin
+does not display its own permission prompt. Apps may also check the permission
+status through the core `PermissionStatus` API.
 
-Call `registerRemote()` from a user action after requesting the shared
-Notifications permission. On iOS it registers with APNs and returns the APNs
-device token. On Android, add the Firebase app options to `nexa.config.nx`:
+Call `registerRemote()` from a user action to register for remote delivery. It
+does not require the Notifications presentation permission: APNs/FCM tokens
+can also be used for silent or data-only messages when visible notifications
+are disabled. On iOS it registers with APNs and returns the APNs device token.
+On Android, add the Firebase app options to `nexa.config.nx`:
 
 ```nx
 plugins {

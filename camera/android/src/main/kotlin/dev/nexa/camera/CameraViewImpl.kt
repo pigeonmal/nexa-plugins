@@ -21,6 +21,7 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.PendingRecording
 import androidx.camera.video.Quality
@@ -347,7 +348,12 @@ private class CameraCaptureController(private val context: Context) {
             }
             val videoCaptureForMode = if (current.recording) {
                 val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.from(Quality.HD))
+                    .setQualitySelector(
+                        QualitySelector.from(
+                            Quality.HD,
+                            FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
+                        ),
+                    )
                     .build()
                 VideoCapture.withOutput(recorder).also(useCases::add)
             } else {

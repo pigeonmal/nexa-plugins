@@ -7,11 +7,29 @@ public final class InAppPurchasesImpl: InAppPurchasesSpec {
     private var disposed = false
     private var emittedTransactionIDs = Set<String>()
     private var emittedTransactionOrder: [String] = []
+    private var pendingPurchaseUpdates: [StoreTransaction] = []
 
-    public var onPurchaseUpdated: ((StoreTransaction) -> Void)?
+    public var onPurchaseUpdated: ((StoreTransaction) -> Void)? {
+        didSet {
+            guard let handler = onPurchaseUpdated, !pendingPurchaseUpdates.isEmpty else { return }
+            let pending = pendingPurchaseUpdates
+            pendingPurchaseUpdates.removeAll(keepingCapacity: true)
+            pending.forEach(handler)
+        }
+    }
 
     public required init() {
         updatesTask = Task { [weak self] in
+            // StoreKit does not replay every transaction that was already
+            // unfinished when this process started through Transaction.updates.
+            // Drain that finite sequence first so the app can verify, deliver,
+            // and finish transactions after relaunch (notably consumables).
+            for await result in Transaction.unfinished {
+                guard !Task.isCancelled, let self, !self.disposed else { return }
+                guard case .verified(let transaction) = result else { continue }
+                self.emitPurchaseUpdate(self.value(for: transaction, jws: result.jwsRepresentation))
+            }
+
             for await result in Transaction.updates {
                 guard !Task.isCancelled, let self, !self.disposed else { return }
                 guard case .verified(let transaction) = result else { continue }
@@ -122,6 +140,7 @@ public final class InAppPurchasesImpl: InAppPurchasesSpec {
         disposed = true
         updatesTask?.cancel()
         updatesTask = nil
+        pendingPurchaseUpdates.removeAll(keepingCapacity: false)
         onPurchaseUpdated = nil
     }
 
@@ -154,6 +173,10 @@ public final class InAppPurchasesImpl: InAppPurchasesSpec {
         if emittedTransactionOrder.count > 128 {
             emittedTransactionIDs.remove(emittedTransactionOrder.removeFirst())
         }
-        onPurchaseUpdated?(transaction)
+        if let onPurchaseUpdated {
+            onPurchaseUpdated(transaction)
+        } else {
+            pendingPurchaseUpdates.append(transaction)
+        }
     }
 }

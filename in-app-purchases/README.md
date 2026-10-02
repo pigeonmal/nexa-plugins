@@ -42,6 +42,10 @@ purchase flow and later pending-purchase transitions. The active `purchase()`
 call also returns its immediate result; if the event and result describe the
 same transaction, use its transaction ID to process it once.
 
+On iOS, creating the plugin instance also queues verified transactions that
+were unfinished when the app last closed. They are emitted once the app
+attaches its update handler, so delivery can be completed after relaunch.
+
 Use `ownedPurchases()` to refresh purchases known by the current store account.
 `restorePurchases()` calls StoreKit's user-initiated synchronization and then
 reads current entitlements; on Android it reads owned purchases from Google

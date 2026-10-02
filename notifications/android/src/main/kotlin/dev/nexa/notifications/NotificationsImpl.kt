@@ -140,7 +140,6 @@ public class NotificationsImpl : NotificationsSpec {
 
     @Suppress("DEPRECATION")
     override suspend fun registerRemote(): String {
-        ensureNotificationsEnabled(context)
         val apiKey = NexaPluginConfig.Notifications.fcmApiKey
         val applicationId = NexaPluginConfig.Notifications.fcmApplicationId
         val projectId = NexaPluginConfig.Notifications.fcmProjectId

@@ -246,15 +246,9 @@ public final class NotificationsImpl: NotificationsSpec {
     }
 
     public func registerRemote() async throws(NotificationError) -> String {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            break
-        case .notDetermined, .denied:
-            throw .permissionDenied
-        @unknown default:
-            throw .permissionDenied
-        }
+        // APNs registration is independent of notification presentation
+        // authorization. Apps may need the token for silent/data pushes even
+        // when the user has disabled visible notifications.
         return try await NotificationsRemoteHub.shared.register()
     }
 

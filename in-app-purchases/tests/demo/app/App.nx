@@ -1,0 +1,108 @@
+plugin "../../../" as InAppPurchases
+
+app InAppPurchasesDemo {
+    let store = InAppPurchases()
+
+    state operationTask: TaskHandle? = null
+    state status: String = "Load store products to begin."
+    state productCount: Int32 = 0
+    state transactionID: String = ""
+
+    body {
+        OnAppear {
+            store.purchaseUpdated { transaction ->
+                transactionID = transaction.id
+                Log.info(message: "NEXA_IAP_PURCHASE_UPDATED \(transaction.id)")
+            }
+        }
+        OnDisappear {
+            store.dispose()
+        }
+
+        Column(spacing: 12, padding: 20) {
+            Text("In-App Purchases")
+            Text(status)
+            Text("Products loaded: \(productCount)")
+
+            Button("Load store products") {
+                Task.launch(handle: operationTask, executor: TaskExecutor.Main) {
+                    try {
+                        productCount = (await store.products([
+                            "dev.nexa.inapppurchases.demo.coins",
+                            "dev.nexa.inapppurchases.demo.pro",
+                        ])).count
+                        status = "Product catalog loaded."
+                        Log.info(message: "NEXA_IAP_PRODUCT_CATALOG_LOADED \(productCount)")
+                    } catch {
+                        case InAppPurchases.InAppPurchaseError.billingUnavailable {
+                            status = "The store is unavailable."
+                            Log.info(message: "NEXA_IAP_BILLING_UNAVAILABLE")
+                        }
+                        else {
+                            status = "Store product lookup failed."
+                            Log.info(message: "NEXA_IAP_PRODUCT_LOOKUP_FAILED")
+                        }
+                    }
+                }
+            }
+
+            Button("Buy test coins") {
+                Task.launch(handle: operationTask, executor: TaskExecutor.Main) {
+                    try {
+                        if (await store.purchase("dev.nexa.inapppurchases.demo.coins", null)).status == InAppPurchases.PurchaseStatus.purchased {
+                            status = "Purchase completed; delivering coins."
+                            Log.info(message: "NEXA_IAP_PURCHASE_RESULT_PURCHASED")
+                        } else {
+                            status = "Purchase is pending or cancelled; no coins were granted."
+                        }
+                    } catch {
+                        case InAppPurchases.InAppPurchaseError.purchaseInProgress {
+                            status = "Another purchase is still in progress."
+                        }
+                        else {
+                            status = "Purchase could not be completed."
+                        }
+                    }
+                }
+            }
+
+            Button("Complete delivered consumable") {
+                if transactionID != "" {
+                    Task.launch(handle: operationTask, executor: TaskExecutor.Main) {
+                        try {
+                            await store.complete(transactionID, true)
+                            status = "Consumable completed."
+                            Log.info(message: "NEXA_IAP_CONSUMABLE_COMPLETED")
+                            transactionID = ""
+                        } catch {
+                            case InAppPurchases.InAppPurchaseError.transactionNotFound(id) {
+                                status = "Transaction not found: \(id)"
+                            }
+                            else {
+                                status = "Transaction completion failed."
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button("Restore and read owned purchases") {
+                Task.launch(handle: operationTask, executor: TaskExecutor.Main) {
+                    try {
+                        productCount = (await store.restorePurchases()).count
+                        status = "Store returned \(productCount) owned purchases."
+                        Log.info(message: "NEXA_IAP_RESTORE_COUNT \(productCount)")
+                    } catch {
+                        case InAppPurchases.InAppPurchaseError.billingUnavailable {
+                            status = "The store is unavailable."
+                            Log.info(message: "NEXA_IAP_BILLING_UNAVAILABLE")
+                        }
+                        else {
+                            status = "Restore failed."
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

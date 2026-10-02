@@ -95,3 +95,19 @@ The maintainer app under `tests/demo/app` exercises permission handling,
 preview, photo/video requests, barcode callbacks, throttled frame events, and
 teardown. Native contract, dependency, permission, and implementation changes
 require a host rebuild; app event handlers remain hot reloadable.
+
+## Android camera barcode acceptance
+
+The log-only acceptance app is in `tests/acceptance/app`. It scans the generated
+Code 128 fixture at `tests/fixtures/code128-nexa-camera.png` and logs
+`CAMERA_BARCODE_ACCEPTANCE: NEXA-CAMERA-1` when CameraX frames reach ML Kit.
+For a deterministic Android Emulator source, start the AVD with:
+
+```bash
+emulator @<avd-name> -camera-back imagefile:/absolute/path/to/plugins/camera/tests/fixtures/code128-nexa-camera.png
+```
+
+Then run `nexa check` and `nexa dev --android --once` from
+`tests/acceptance/app`, and inspect `adb logcat -s Nexa`. The AVD's default
+software `emulated` camera does not use imported virtual-scene images; the
+`imagefile:` camera source feeds the fixture directly to CameraX.

@@ -5,12 +5,13 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.graphics.Color
 import android.os.Build
 import android.util.Rational
 import android.view.View
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,26 +28,47 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cronet.CronetDataSource
 import androidx.media3.datasource.cronet.CronetUtil
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
+import androidx.media3.exoplayer.source.preload.TargetPreloadStatusControl
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.chromium.net.CronetEngine
+import java.io.File
 import java.net.URI
 import java.util.WeakHashMap
+import java.util.LinkedHashMap
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+@OptIn(UnstableApi::class)
 public class VideoPlayerImpl : VideoPlayerSpec {
     private val prepareMutex = Mutex()
     private var engine: VideoPlayerEngine? = null
+    private var preloadManager: DefaultPreloadManager? = null
+    private var currentPreloadPosition: Int = 0
+    private var preparedUrl: String? = null
+    private val preloadedItems = LinkedHashMap<String, PreloadedVideo>()
+    private var reusablePlayerView: NexaPlayerView? = null
+    private var disposed = false
     private var pictureInPictureBindings: MutableList<AutoCloseable>? = null
+
+    private data class PreloadedVideo(val item: MediaItem, val index: Int)
 
     public override var state: PlayerState = PlayerState.idle
         private set
@@ -57,6 +79,11 @@ public class VideoPlayerImpl : VideoPlayerSpec {
             field = value
             engine?.setVolume(value)
         }
+    public override var looping: Boolean = false
+        set(value) {
+            field = value
+            nativePlayer?.repeatMode = if (value) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        }
     public override var onEnded: (() -> Unit)? = null
 
     internal var nativePlayer: ExoPlayer? = null
@@ -64,19 +91,54 @@ public class VideoPlayerImpl : VideoPlayerSpec {
 
     internal fun attachContext(context: Context, softwareDecodingEnabled: Boolean = true) {
         if (engine != null) return
+        disposed = false
         val applicationContext = context.applicationContext
-        val player = ExoPlayer.Builder(applicationContext)
+        val statusControl = TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> { index ->
+            when (index) {
+                currentPreloadPosition + 1 -> DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(2_500L)
+                currentPreloadPosition + 2 -> DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(1_000L)
+                else -> DefaultPreloadManager.PreloadStatus.PRELOAD_STATUS_NOT_PRELOADED
+            }
+        }
+        val builder = DefaultPreloadManager.Builder(applicationContext, statusControl)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(applicationContext)
-                    .setDataSourceFactory(VideoPlayerCronetRuntime.dataSourceFactory(applicationContext)),
+                    .setDataSourceFactory(VideoPlayerCronetRuntime.cachedDataSourceFactory(applicationContext)),
             )
             .setRenderersFactory(
                 NexaFfmpegRenderersFactory(applicationContext, softwareDecodingEnabled),
             )
-            .build()
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setPlayerTargetBufferBytes("preload", 16 * 1024 * 1024)
+                    .build(),
+            )
+        val manager = builder.build()
+        val player = builder.buildExoPlayer()
+        preloadManager = manager
         nativePlayer = player
+        player.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         attachEngine(ExoPlayerVideoPlayerEngine(player))
         engine?.setVolume(volume)
+    }
+
+    internal fun acquirePlayerView(context: Context): PlayerView {
+        val reusable = reusablePlayerView
+        reusablePlayerView = null
+        if (
+            reusable != null && reusable.parent == null &&
+            reusable.context.findComponentActivity() === context.findComponentActivity()
+        ) {
+            return reusable
+        }
+        return NexaPlayerView(context)
+    }
+
+    internal fun recyclePlayerView(view: PlayerView) {
+        val reusable = view as? NexaPlayerView ?: return
+        if (!disposed && reusable.parent == null) {
+            reusablePlayerView = reusable
+        }
     }
 
     internal fun attachEngine(value: VideoPlayerEngine) {
@@ -118,15 +180,57 @@ public class VideoPlayerImpl : VideoPlayerSpec {
                 state = PlayerState.failed
                 throw PlayerError.decodingFailed("VideoView has not attached a player context")
             }
+            if (preparedUrl == url && (
+                    state == PlayerState.ready || state == PlayerState.paused || state == PlayerState.playing
+                )
+            ) {
+                return@withLock
+            }
 
             state = PlayerState.preparing
             try {
-                playerEngine.prepare(url)
+                val item = preloadedItems[url]?.item ?: MediaItem.fromUri(url)
+                val mediaSource = preloadManager?.getMediaSource(item)
+                playerEngine.prepare(url, mediaSource)
+                preparedUrl = url
             } catch (error: PlayerError) {
+                preparedUrl = null
                 state = PlayerState.failed
                 throw error
             }
         }
+    }
+
+    public override fun preload(url: String, index: Int) {
+        if (runCatching { URI(url).scheme?.lowercase() }.getOrNull() !in setOf("http", "https")) {
+            return
+        }
+        val manager = preloadManager ?: return
+        val normalizedIndex = index.coerceAtLeast(0)
+        if (normalizedIndex !in (currentPreloadPosition + 1)..(currentPreloadPosition + 2)) return
+        val existing = preloadedItems[url]
+        if (existing?.index == normalizedIndex) return
+        if (existing != null) manager.remove(existing.item)
+
+        val item = MediaItem.fromUri(url)
+        preloadedItems[url] = PreloadedVideo(item, normalizedIndex)
+        manager.add(item, normalizedIndex)
+        manager.invalidate()
+    }
+
+    public override fun setPreloadPosition(index: Int) {
+        val normalizedIndex = index.coerceAtLeast(0)
+        currentPreloadPosition = normalizedIndex
+        val manager = preloadManager ?: return
+        manager.setCurrentPlayingIndex(normalizedIndex)
+        val staleUrls = preloadedItems
+            .filterValues { it.index < normalizedIndex - 2 || it.index > normalizedIndex + 2 }
+            .keys
+            .toList()
+        staleUrls.forEach { url ->
+            preloadedItems.remove(url)?.let { manager.remove(it.item) }
+        }
+        manager.invalidate()
     }
 
     public override fun play() {
@@ -142,9 +246,16 @@ public class VideoPlayerImpl : VideoPlayerSpec {
     }
 
     public override fun dispose() {
+        disposed = true
         onEnded = null
         pictureInPictureBindings?.toList()?.forEach(AutoCloseable::close)
         pictureInPictureBindings = null
+        reusablePlayerView?.player = null
+        reusablePlayerView = null
+        preloadManager?.release()
+        preloadManager = null
+        preloadedItems.clear()
+        preparedUrl = null
         val playerEngine = engine
         engine = null
         nativePlayer = null
@@ -155,16 +266,35 @@ public class VideoPlayerImpl : VideoPlayerSpec {
 
 /** One embedded Cronet engine and response executor are shared by all players. */
 private object VideoPlayerCronetRuntime {
+    private const val MAX_DISK_CACHE_BYTES = 256L * 1024L * 1024L
     private val responseExecutor: Executor = Executors.newSingleThreadExecutor { command ->
         Thread(command, "NexaVideoCronet").apply { isDaemon = true }
     }
 
     @Volatile
     private var sharedEngine: CronetEngine? = null
+    @Volatile
+    private var sharedCache: SimpleCache? = null
 
     fun dataSourceFactory(context: Context): DataSource.Factory {
         val cronetFactory = CronetDataSource.Factory(engine(context), responseExecutor)
         return DefaultDataSource.Factory(context.applicationContext, cronetFactory)
+    }
+
+    fun cachedDataSourceFactory(context: Context): DataSource.Factory = CacheDataSource.Factory()
+        .setCache(cache(context))
+        .setUpstreamDataSourceFactory(dataSourceFactory(context))
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+    private fun cache(context: Context): SimpleCache {
+        sharedCache?.let { return it }
+        return synchronized(this) {
+            sharedCache ?: SimpleCache(
+                File(context.cacheDir, "nexa-video-cache"),
+                LeastRecentlyUsedCacheEvictor(MAX_DISK_CACHE_BYTES),
+                StandaloneDatabaseProvider(context.applicationContext),
+            ).also { sharedCache = it }
+        }
     }
 
     private fun engine(context: Context): CronetEngine {
@@ -187,6 +317,9 @@ internal interface VideoPlayerEngine {
 
     fun setListener(listener: Listener?)
     suspend fun prepare(url: String)
+    suspend fun prepare(url: String, mediaSource: MediaSource?) {
+        prepare(url)
+    }
     fun setVolume(volume: Double)
     fun play()
     fun pause()
@@ -194,6 +327,7 @@ internal interface VideoPlayerEngine {
     fun release()
 }
 
+@OptIn(UnstableApi::class)
 private class ExoPlayerVideoPlayerEngine(private val player: ExoPlayer) : VideoPlayerEngine {
     private var listener: VideoPlayerEngine.Listener? = null
     private var pendingPrepare: CancellableContinuation<Unit>? = null
@@ -233,6 +367,10 @@ private class ExoPlayerVideoPlayerEngine(private val player: ExoPlayer) : VideoP
     }
 
     override suspend fun prepare(url: String) {
+        prepare(url, null)
+    }
+
+    override suspend fun prepare(url: String, mediaSource: MediaSource?) {
         suspendCancellableCoroutine { continuation ->
             val prepareListener = object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -261,7 +399,11 @@ private class ExoPlayerVideoPlayerEngine(private val player: ExoPlayer) : VideoP
                 player.removeListener(prepareListener)
                 clearPendingPrepare(continuation)
             }
-            player.setMediaItem(MediaItem.fromUri(url))
+            if (mediaSource != null) {
+                player.setMediaSource(mediaSource)
+            } else {
+                player.setMediaItem(MediaItem.fromUri(url))
+            }
             player.prepare()
         }
     }
@@ -306,7 +448,6 @@ public fun VideoViewImpl(
     player: VideoPlayer,
     controls: Boolean,
     softwareDecodingEnabled: Boolean,
-    onTapped: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -314,13 +455,16 @@ public fun VideoViewImpl(
     val pictureInPicture = remember(player) {
         mutableStateOf(activity?.isInPictureInPictureMode == true)
     }
-    Box {
+    Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
-            modifier = if (onTapped == null) Modifier else Modifier.clickable { onTapped.invoke() },
+            modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 player.attachContext(context, softwareDecodingEnabled)
-                NexaPlayerView(context).apply {
+                (player.acquirePlayerView(context) as NexaPlayerView).apply {
                     useController = controls
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    setKeepContentOnPlayerReset(true)
+                    setShutterBackgroundColor(Color.TRANSPARENT)
                     this.player = player.nativePlayer
                     val exoPlayer = player.nativePlayer
                     if (activity != null && exoPlayer != null) {
@@ -346,6 +490,8 @@ public fun VideoViewImpl(
                 view.pipRegistration?.let { view.pipOwner?.detachPictureInPictureBinding(it) }
                 view.pipRegistration = null
                 view.pipOwner = null
+                view.player = null
+                player.recyclePlayerView(view)
             },
         )
         if (!pictureInPicture.value) content()

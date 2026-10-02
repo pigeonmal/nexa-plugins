@@ -1,0 +1,16 @@
+config {
+    app {
+        displayName: "CameraScanAcceptance",
+        version: "1.0.0",
+        buildNumber: 1,
+    }
+    ios {
+        minVersion: "17.0",
+        bundleIdentifier: "dev.nexa.camera.acceptance",
+    }
+    android {
+        minSdk: 23,
+        targetSdk: 36,
+        applicationId: "dev.nexa.camera.acceptance",
+    }
+}

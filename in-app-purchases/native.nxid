@@ -1,0 +1,75 @@
+enum ProductKind {
+    oneTime
+    subscription
+}
+
+enum PurchaseStatus {
+    purchased
+    pending
+    cancelled
+}
+
+struct PricingPhase {
+    displayPrice: String
+    billingPeriod: String?
+    billingCycleCount: Int32
+}
+
+struct ProductOffer {
+    id: String
+    pricingPhases: Array<PricingPhase>
+}
+
+struct StoreProduct {
+    id: String
+    title: String
+    description: String
+    displayPrice: String
+    kind: ProductKind
+    offers: Array<ProductOffer>
+}
+
+struct StoreTransaction {
+    id: String
+    productIDs: Array<String>
+    status: PurchaseStatus
+    purchasedAtMillis: Int64
+    expiresAtMillis: Int64?
+    quantity: Int32
+    verificationPayload: String
+}
+
+struct PurchaseResult {
+    status: PurchaseStatus
+    transaction: StoreTransaction?
+}
+
+error InAppPurchaseError {
+    billingUnavailable
+    invalidProductIdentifier(productID: String)
+    productNotFound(productID: String)
+    offerNotFound(offerID: String)
+    offerSelectionRequired
+    activityUnavailable
+    purchaseInProgress
+    transactionNotFound(transactionID: String)
+    verificationFailed
+    storeError(message: String)
+}
+
+/// StoreKit 2 and Google Play Billing access for digital products.
+/// Create one instance per app and call `complete` only after the product has
+/// been delivered or the entitlement has been granted.
+native class InAppPurchases {
+    init()
+
+    async fn products(productIDs: Array<String>) -> Array<StoreProduct> throws InAppPurchaseError
+    async fn purchase(productID: String, offerID: String?) -> PurchaseResult throws InAppPurchaseError
+    async fn ownedPurchases() -> Array<StoreTransaction> throws InAppPurchaseError
+    async fn restorePurchases() -> Array<StoreTransaction> throws InAppPurchaseError
+    async fn complete(transactionID: String, consumable: Bool) throws InAppPurchaseError
+
+    event purchaseUpdated(transaction: StoreTransaction)
+
+    fn dispose()
+}

@@ -1,0 +1,18 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.in-app-purchases"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "17.0"
+        sources: ["ios/Sources/**/*.swift"]
+        frameworks: ["StoreKit"]
+    }
+    android {
+        minSdk: 23
+        sources: ["android/src/main/kotlin/**/*.kt"]
+        dependencies: ["com.android.billingclient:billing:9.1.0"]
+    }
+}

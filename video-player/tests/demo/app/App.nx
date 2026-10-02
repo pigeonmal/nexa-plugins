@@ -10,14 +10,16 @@ component PlayerMedia(player: VideoPlayer.VideoPlayer, title: String) {
     state tapped = false
 
     body {
-        VideoPlayer.VideoView(player: player) {
-            Column {
-                Text(title)
-                if tapped {
-                    Text("Tapped")
+        Pressable() {
+            VideoPlayer.VideoView(player: player) {
+                Column {
+                    Text(title)
+                    if tapped {
+                        Text("Tapped")
+                    }
                 }
             }
-        }.onTapped {
+        }.onTap {
             tapped = true
         }
     }
@@ -56,9 +58,11 @@ app VideoPlayerDemo {
         }
         Column {
             PlayerSurface(player: player1, title: "First player")
-            VideoPlayer.VideoView(player: player2, controls: false, softwareDecodingEnabled: false) {
-                Text("Second player")
-            }.onTapped {
+            Pressable() {
+                VideoPlayer.VideoView(player: player2, controls: false, softwareDecodingEnabled: false) {
+                    Text("Second player")
+                }
+            }.onTap {
                 secondTapped = true
             }
             Button("Play first player") {

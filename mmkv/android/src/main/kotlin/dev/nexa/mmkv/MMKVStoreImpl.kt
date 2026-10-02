@@ -47,12 +47,16 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         this.isMultiProcess = multiProcess
 
         // MMKV.initialize loads its native library. Registering the handler
-        // first calls a JNI method before that library is loaded.
-        // Match iOS's quiet initialization. MMKV's default INFO logger emits
-        // native logcat messages during writes, adding work to the hot path.
+        // through initialization enables content notifications without a
+        // second global registration call. Match iOS's quiet initialization;
+        // MMKV's default INFO logger emits native logcat messages during
+        // writes, adding work to the hot path.
         val rootDir = MMKV.initialize(
             NexaRuntimeCore.context().applicationContext,
+            null,
+            null,
             MMKVLogLevel.LevelNone,
+            MMKVStoreObserver,
         )
         this.rootDirectory = rootDir
         this.version = MMKV.version()
@@ -137,61 +141,61 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     override fun <T> setObject(
         key: String,
         value: T,
-        encode: (T, NexaValueWriter) -> Unit,
+        encode0: (T, NexaValueWriter) -> Unit,
     ): Boolean {
         val writer = NexaValueWriter()
-        encode(value, writer)
+        encode0(value, writer)
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <T> getObject(key: String, decode: (NexaValueReader) -> NexaValueReadResult<T>): T? {
+    override fun <T> getObject(key: String, decode0: (NexaValueReader) -> NexaValueReadResult<T>): T? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data)).valueOrNull()
+        return decode0(NexaValueReader(data)).valueOrNull()
     }
 
     override fun <T> setList(
         key: String,
         values: List<T>,
-        encode: (List<T>, NexaValueWriter) -> Unit,
+        encode0: (List<T>, NexaValueWriter) -> Unit,
     ): Boolean {
         val writer = NexaValueWriter()
-        encode(values, writer)
+        encode0(values, writer)
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <T> getList(key: String, decode: (NexaValueReader) -> NexaValueReadResult<List<T>>): List<T>? {
+    override fun <T> getList(key: String, decode0: (NexaValueReader) -> NexaValueReadResult<List<T>>): List<T>? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data)).valueOrNull()
+        return decode0(NexaValueReader(data)).valueOrNull()
     }
 
     override fun <T> setSet(
         key: String,
         values: Set<T>,
-        encode: (Set<T>, NexaValueWriter) -> Unit,
+        encode0: (Set<T>, NexaValueWriter) -> Unit,
     ): Boolean {
         val writer = NexaValueWriter()
-        encode(values, writer)
+        encode0(values, writer)
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <T> getSet(key: String, decode: (NexaValueReader) -> NexaValueReadResult<Set<T>>): Set<T>? {
+    override fun <T> getSet(key: String, decode0: (NexaValueReader) -> NexaValueReadResult<Set<T>>): Set<T>? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data)).valueOrNull()
+        return decode0(NexaValueReader(data)).valueOrNull()
     }
 
     override fun <K, V> setMap(
         key: String,
         values: Map<K, V>,
-        encode: (Map<K, V>, NexaValueWriter) -> Unit,
+        encode0: (Map<K, V>, NexaValueWriter) -> Unit,
     ): Boolean {
         val writer = NexaValueWriter()
-        encode(values, writer)
+        encode0(values, writer)
         return setBuffer(key, writer.toByteArray())
     }
 
-    override fun <K, V> getMap(key: String, decode: (NexaValueReader) -> NexaValueReadResult<Map<K, V>>): Map<K, V>? {
+    override fun <K, V> getMap(key: String, decode0: (NexaValueReader) -> NexaValueReadResult<Map<K, V>>): Map<K, V>? {
         val data = getBuffer(key) ?: return null
-        return decode(NexaValueReader(data)).valueOrNull()
+        return decode0(NexaValueReader(data)).valueOrNull()
     }
 
     // MARK: - Key space
@@ -441,16 +445,8 @@ public class MMKVStoreImpl : MMKVStoreSpec {
  */
 internal object MMKVStoreObserver : MMKVHandler {
     private val stores = ConcurrentHashMap<String, MMKVStoreImpl>()
-    private var handlerRegistered = false
 
-    @Synchronized
     fun register(store: MMKVStoreImpl) {
-        if (!handlerRegistered) {
-            // Install after MMKV.initialize has loaded the native library and
-            // before the first multi-process store is opened.
-            MMKV.registerHandler(this)
-            handlerRegistered = true
-        }
         stores[store.instanceID] = store
     }
 
@@ -482,6 +478,8 @@ internal object MMKVStoreObserver : MMKVHandler {
      * up. There is no file to write, so redirecting to a file is declined.
      */
     override fun wantLogRedirecting(): Boolean = false
+
+    override fun wantContentChangeNotification(): Boolean = true
 
     override fun mmkvLog(
         level: MMKVLogLevel,

@@ -1,0 +1,17 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.sqlite"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "13.0"
+        sources: ["ios/Sources/**/*.swift"]
+        linkerFlags: ["-lsqlite3"]
+    }
+    android {
+        minSdk: 23
+        sources: ["android/src/main/kotlin/**/*.kt"]
+    }
+}

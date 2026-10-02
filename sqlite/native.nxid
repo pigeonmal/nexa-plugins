@@ -1,0 +1,65 @@
+// SQLite's dynamic rows cross the plugin boundary as typed arrays. Every cell
+// carries one explicit kind and exactly one matching payload field.
+enum SQLiteValueKind {
+    nullValue
+    integer
+    real
+    text
+    blob
+}
+
+struct SQLiteValue {
+    kind: SQLiteValueKind
+    integerValue: Int64?
+    realValue: Float64?
+    textValue: String?
+    blobValue: Bytes?
+}
+
+struct SQLiteStatement {
+    sql: String
+    parameters: Array<SQLiteValue>
+}
+
+struct SQLiteExecutionResult {
+    rowsAffected: Int64
+    lastInsertRowId: Int64
+}
+
+struct SQLiteQueryResult {
+    columnNames: Array<String>
+    rows: Array<Array<SQLiteValue>>
+}
+
+/// A migration version must start at 1 and increase by one for each entry.
+struct SQLiteMigration {
+    version: Int32
+    statements: Array<SQLiteStatement>
+}
+
+error SQLiteError {
+    invalidDatabaseName(message: String)
+    openFailed(message: String)
+    invalidValue(message: String)
+    prepareFailed(message: String)
+    bindFailed(message: String)
+    executeFailed(message: String)
+    queryFailed(message: String)
+    transactionFailed(message: String)
+    migrationFailed(message: String)
+    closed
+}
+
+/// App-private SQLite database. SQL runs asynchronously away from the UI
+/// executor. Migrations and statement batches are applied atomically.
+native class SQLiteDatabase {
+    init(name: String)
+
+    async fn execute(sql: String, parameters: Array<SQLiteValue>) -> SQLiteExecutionResult throws SQLiteError
+    async fn query(sql: String, parameters: Array<SQLiteValue>) -> SQLiteQueryResult throws SQLiteError
+    async fn executeTransaction(statements: Array<SQLiteStatement>) -> Array<SQLiteExecutionResult> throws SQLiteError
+    async fn migrate(migrations: Array<SQLiteMigration>) -> Int32 throws SQLiteError
+    async fn userVersion() -> Int32 throws SQLiteError
+
+    fn dispose()
+}

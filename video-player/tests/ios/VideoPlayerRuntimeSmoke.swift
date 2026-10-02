@@ -20,6 +20,7 @@ public protocol VideoPlayerSpec {
     var state: PlayerState { get }
     var duration: Double { get }
     var volume: Double { get set }
+    var looping: Bool { get set }
     var onEnded: (() -> Void)? { get set }
 
     func prepare(_ url: String) async throws(PlayerError)

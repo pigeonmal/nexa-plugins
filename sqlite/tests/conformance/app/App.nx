@@ -1,0 +1,165 @@
+plugin "dev.nexa.sqlite" as SQLite
+
+app SQLiteConformance {
+    let database = SQLite.SQLiteDatabase("conformance")
+    let int64Zero: Int64 = 0
+    let int64One: Int64 = 1
+    let int64Two: Int64 = 2
+    let migrations = [
+        SQLite.SQLiteMigration(1, [
+            SQLite.SQLiteStatement(
+                "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, score REAL NOT NULL, payload BLOB, optional_text TEXT)",
+                []
+            ),
+        ]),
+        SQLite.SQLiteMigration(2, [
+            SQLite.SQLiteStatement(
+                "ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+                []
+            ),
+        ]),
+    ]
+
+    state status = "Waiting for SQLite"
+    state migratedVersion = 0
+    state currentVersion = 0
+    state inserted = [SQLite.SQLiteExecutionResult(0, 0)]
+    state directExecution = SQLite.SQLiteExecutionResult(0, 0)
+    state selected = SQLite.SQLiteQueryResult([], [])
+    state rollbackError = ""
+    state afterRollback = SQLite.SQLiteQueryResult([], [])
+
+    body {
+        OnAppear async {
+            try {
+                migratedVersion = await database.migrate(migrations)
+                currentVersion = await database.userVersion()
+                if migratedVersion == 2 && currentVersion == 2 {
+                    Log.info(message: "SQLITE_MIGRATION_PASS")
+                } else {
+                    Log.error(message: "SQLITE_MIGRATION_FAIL")
+                }
+
+                inserted = await database.executeTransaction([
+                    SQLite.SQLiteStatement(
+                        "INSERT OR REPLACE INTO notes (id, title, score, payload, optional_text) VALUES (?, ?, ?, ?, ?)",
+                        [
+                            SQLite.SQLiteValue(SQLite.SQLiteValueKind.integer, 41, null, null, null),
+                            SQLite.SQLiteValue(SQLite.SQLiteValueKind.text, null, null, "nexa", null),
+                            SQLite.SQLiteValue(SQLite.SQLiteValueKind.real, null, 2.5, null, null),
+                            SQLite.SQLiteValue(SQLite.SQLiteValueKind.blob, null, null, null, Bytes.fromText(text: "blob-value")),
+                            SQLite.SQLiteValue(SQLite.SQLiteValueKind.nullValue, null, null, null, null),
+                        ]
+                    ),
+                    SQLite.SQLiteStatement(
+                        "UPDATE notes SET archived = 1 WHERE id = ?",
+                        [SQLite.SQLiteValue(SQLite.SQLiteValueKind.integer, 41, null, null, null)]
+                    ),
+                ])
+                if inserted.count == 2 && inserted[0].rowsAffected == 1 {
+                    Log.info(message: "SQLITE_TRANSACTION_COMMIT_PASS")
+                } else {
+                    Log.error(message: "SQLITE_TRANSACTION_COMMIT_FAIL")
+                }
+
+                directExecution = await database.execute(
+                    "UPDATE notes SET archived = 2 WHERE id = ?",
+                    [SQLite.SQLiteValue(SQLite.SQLiteValueKind.integer, 41, null, null, null)]
+                )
+                if directExecution.rowsAffected == int64One {
+                    Log.info(message: "SQLITE_EXECUTE_PASS")
+                } else {
+                    Log.error(message: "SQLITE_EXECUTE_FAIL")
+                }
+
+                selected = await database.query(
+                    "SELECT id, title, score, payload, optional_text, archived FROM notes WHERE id = ?",
+                    [SQLite.SQLiteValue(SQLite.SQLiteValueKind.integer, 41, null, null, null)]
+                )
+                if selected.columnNames.count == 6
+                    && selected.rows.count == 1
+                    && selected.rows[0][0].kind == SQLite.SQLiteValueKind.integer
+                    && (selected.rows[0][1].textValue ?? "") == "nexa"
+                    && (selected.rows[0][2].realValue ?? 0.0) == 2.5
+                    && Bytes.count(bytes: selected.rows[0][3].blobValue ?? Bytes.fromText(text: "")) == 10
+                    && selected.rows[0][4].kind == SQLite.SQLiteValueKind.nullValue
+                    && (selected.rows[0][5].integerValue ?? int64Zero) == int64Two {
+                    Log.info(message: "SQLITE_TYPED_QUERY_PASS")
+                    status = "SQLite query passed"
+                } else {
+                    Log.error(message: "SQLITE_TYPED_QUERY_FAIL")
+                }
+
+                try {
+                    inserted = await database.executeTransaction([
+                        SQLite.SQLiteStatement(
+                            "INSERT INTO notes (id, title, score) VALUES (?, ?, ?)",
+                            [
+                                SQLite.SQLiteValue(SQLite.SQLiteValueKind.integer, 42, null, null, null),
+                                SQLite.SQLiteValue(SQLite.SQLiteValueKind.text, null, null, "rollback", null),
+                                SQLite.SQLiteValue(SQLite.SQLiteValueKind.real, null, 1.0, null, null),
+                            ]
+                        ),
+                        SQLite.SQLiteStatement("INSERT INTO missing_table VALUES (1)", []),
+                    ])
+                    Log.error(message: "SQLITE_TRANSACTION_ROLLBACK_FAIL")
+                } catch {
+                    case SQLite.SQLiteError.transactionFailed(message) {
+                        rollbackError = message
+                    }
+                    else {
+                        Log.error(message: "SQLITE_TRANSACTION_UNEXPECTED_FAIL")
+                    }
+                }
+                afterRollback = await database.query(
+                    "SELECT id FROM notes WHERE id = ?",
+                    [SQLite.SQLiteValue(SQLite.SQLiteValueKind.integer, 42, null, null, null)]
+                )
+                if afterRollback.rows.isEmpty && rollbackError != "" {
+                    Log.info(message: "SQLITE_TRANSACTION_ROLLBACK_PASS")
+                } else {
+                    Log.error(message: "SQLITE_TRANSACTION_ROLLBACK_FAIL")
+                }
+
+                database.dispose()
+                Log.info(message: "SQLITE_DISPOSE_PASS")
+
+            } catch {
+                case SQLite.SQLiteError.invalidDatabaseName(message) {
+                    Log.error(message: "SQLITE_INVALID_NAME: \(message)")
+                }
+                case SQLite.SQLiteError.openFailed(message) {
+                    Log.error(message: "SQLITE_OPEN_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.invalidValue(message) {
+                    Log.error(message: "SQLITE_VALUE_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.prepareFailed(message) {
+                    Log.error(message: "SQLITE_PREPARE_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.bindFailed(message) {
+                    Log.error(message: "SQLITE_BIND_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.executeFailed(message) {
+                    Log.error(message: "SQLITE_EXECUTE_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.queryFailed(message) {
+                    Log.error(message: "SQLITE_QUERY_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.transactionFailed(message) {
+                    Log.error(message: "SQLITE_TRANSACTION_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.migrationFailed(message) {
+                    Log.error(message: "SQLITE_MIGRATION_FAIL: \(message)")
+                }
+                case SQLite.SQLiteError.closed {
+                    Log.error(message: "SQLITE_CLOSED")
+                }
+            }
+        }
+        Column {
+            Text("SQLite conformance")
+            Text(status)
+        }
+    }
+}

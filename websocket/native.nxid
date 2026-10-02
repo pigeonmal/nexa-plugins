@@ -21,7 +21,7 @@ native class WebSocket {
     /// Starts one connection. Handshake success and failure arrive as state events.
     async fn connect() throws WebSocketError
 
-    /// Returns false unless the socket is open or the platform send queue rejects the message.
+    /// Returns true when the local platform queue accepts the message; this does not confirm peer delivery.
     fn send(text: String) -> Bool
     fn sendBytes(bytes: Bytes) -> Bool
 

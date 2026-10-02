@@ -1,0 +1,29 @@
+plugin "../../../" as Camera
+
+app CameraScanAcceptance {
+    state lastBarcode = ""
+    state cameraFailure = ""
+
+    body {
+        Column(spacing: 8, padding: 16) {
+            Camera.CameraView(
+                facing: Camera.CameraFacing.back,
+                barcodeScanningEnabled: true,
+                barcodeFormat: Camera.CameraBarcodeFormat.code128,
+                frameResolution: Camera.CameraFrameResolution.vga,
+                maxFramesPerSecond: 1,
+            )
+                .onBarcodeDetected { barcode ->
+                    lastBarcode = barcode.value
+                    Log.info(message: "CAMERA_BARCODE_ACCEPTANCE: \(barcode.value)")
+                }
+                .onFailed { error ->
+                    cameraFailure = "Camera failed"
+                    Log.info(message: "CAMERA_BARCODE_FAILURE: \(error)")
+                }
+
+            Text("Decoded barcode: \(lastBarcode)")
+            Text(cameraFailure)
+        }
+    }
+}

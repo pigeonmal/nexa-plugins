@@ -1,0 +1,163 @@
+{
+  "appPolicies": {
+    "eula": "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sit amet dictum sit amet.\nEnim tortor at auctor urna nunc id cursus metus aliquam. Placerat orci nulla pellentesque dignissim enim. Nibh sed pulvinar proin gravida hendrerit lectus. Nisl condimentum id venenatis a. Vulputate enim nulla aliquet porttitor lacus luctus. Facilisi nullam vehicula ipsum a arcu. Ullamcorper morbi tincidunt ornare massa eget egestas purus. Erat velit scelerisque in dictum non consectetur.\n\nTellus elementum sagittis vitae et leo. Dignissim enim sit amet venenatis urna cursus eget. Volutpat lacus laoreet non curabitur gravida arcu. Ut tristique et egestas quis ipsum suspendisse ultrices gravida dictum. Dignissim sodales ut eu sem integer vitae justo eget. Sed odio morbi quis commodo odio aenean. Lorem ipsum dolor sit amet consectetur adipiscing elit ut.\n\nElementum curabitur vitae nunc sed velit dignissim sodales ut. Est sit amet facilisis magna etiam tempor orci eu lobortis. Ut faucibus pulvinar elementum integer enim neque volutpat ac. Id faucibus nisl tincidunt eget nullam non nisi est sit. Ac auctor augue mauris augue neque gravida. Ultrices eros in cursus turpis massa tincidunt dui ut ornare. Ut venenatis tellus in metus vulputate eu scelerisque. Imperdiet sed euismod nisi porta. Massa vitae tortor condimentum lacinia quis vel eros donec. Risus nec feugiat in fermentum. Ultricies mi quis hendrerit dolor magna eget est lorem ipsum.\n\nViverra orci sagittis eu volutpat odio facilisis. Erat imperdiet sed euismod nisi porta lorem. Dictum sit amet justo donec enim diam. Pretium fusce id velit ut tortor pretium. In pellentesque massa placerat duis ultricies lacus sed turpis. Consectetur adipiscing elit duis tristique sollicitudin nibh sit amet commodo. Quis blandit turpis cursus in hac habitasse platea dictumst quisque. Tortor aliquam nulla facilisi cras fermentum odio.\\n\\nMi in nulla posuere sollicitudin aliquam ultrices sagittis orci. Eget nulla facilisi etiam dignissim diam. Id cursus metus aliquam eleifend mi in nulla posuere. Diam ut venenatis tellus in metus. Ridiculus mus mauris vitae ultricies leo integer malesuada nunc. Non curabitur gravida arcu ac tortor dignissim. Aenean pharetra magna ac placerat vestibulum lectus mauris ultrices eros. In hac habitasse platea dictumst quisque sagittis purus sit amet. Netus et malesuada fames ac turpis egestas sed tempus. Placerat orci nulla pellentesque dignissim. Et netus et malesuada fames ac turpis.\n\nUt lectus arcu bibendum at varius vel.",
+    "policies": [
+      {
+        "locale": "en_US",
+        "policyText": "",
+        "policyURL": "https://developer.apple.com/storekit/"
+      }
+    ]
+  },
+  "identifier": "4A7D3C91",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "4A7D3C92",
+      "localizations": [
+        {
+          "description": "Consumable used by Nexa in-app purchase acceptance.",
+          "displayName": "Nexa Demo Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "dev.nexa.inapppurchases.demo.coins",
+      "referenceName": "Nexa Demo Coins",
+      "type": "Consumable"
+    }
+  ],
+  "settings": {
+    "_askToBuyEnabled": false,
+    "_billingGracePeriodEnabled": false,
+    "_billingIssuesEnabled": false,
+    "_compatibilityTimeRate": {
+      "3": 6
+    },
+    "_disableDialogs": false,
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_renewalBillingIssuesEnabled": false,
+    "_storefront": "USA",
+    "_storeKitErrors": [
+      {
+        "current": {
+          "index": 2,
+          "type": "generic"
+        },
+        "enabled": false,
+        "name": "Load Products"
+      },
+      {
+        "current": {
+          "index": 1,
+          "type": "purchase"
+        },
+        "enabled": false,
+        "name": "Purchase"
+      },
+      {
+        "current": {
+          "index": 0,
+          "type": "verification"
+        },
+        "enabled": false,
+        "name": "Verification"
+      },
+      {
+        "current": {
+          "index": 2,
+          "type": "generic"
+        },
+        "enabled": false,
+        "name": "App Store Sync"
+      },
+      {
+        "current": {
+          "index": 2,
+          "type": "generic"
+        },
+        "enabled": false,
+        "name": "Subscription Status"
+      },
+      {
+        "current": {
+          "index": 3,
+          "type": "generic"
+        },
+        "enabled": false,
+        "name": "App Transaction"
+      },
+      {
+        "current": {
+          "index": 3,
+          "type": "generic"
+        },
+        "enabled": false,
+        "name": "Manage Subscriptions Sheet"
+      },
+      {
+        "current": {
+          "index": 0,
+          "type": "refund request"
+        },
+        "enabled": false,
+        "name": "Refund Request Sheet"
+      },
+      {
+        "current": {
+          "index": 4,
+          "type": "generic"
+        },
+        "enabled": false,
+        "name": "Offer Code Redeem Sheet"
+      }
+    ],
+    "_timeRate": 1003
+  },
+  "subscriptionGroups": [
+    {
+      "id": "4A7D3C93",
+      "localizations": [],
+      "name": "Nexa Demo Pro",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "billingPlans": [
+            {
+              "billingPlanType": "BILLED_UPFRONT",
+              "commitmentDisplayPrice": "1.99",
+              "displayPrice": "1.99",
+              "internalID": "4A7D3C95",
+              "isEnabled": true
+            }
+          ],
+          "codeOffers": [],
+          "displayPrice": "1.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "4A7D3C94",
+          "introductoryOffers": [],
+          "localizations": [
+            {
+              "description": "Monthly Nexa Pro demo subscription.",
+              "displayName": "Nexa Demo Pro",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "dev.nexa.inapppurchases.demo.pro",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Nexa Demo Pro",
+          "subscriptionGroupID": "4A7D3C93",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 6,
+    "minor": 3
+  }
+}

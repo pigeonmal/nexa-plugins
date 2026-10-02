@@ -2,7 +2,13 @@
 
 Native video playback for Nexa. The plugin exposes independent `VideoPlayer`
 instances, typed playback state and errors, an `ended` event, and a `VideoView`
-with native playback controls.
+with native playback controls. `VideoPlayer.preload(url, index)` and
+`setPreloadPosition(index)` maintain a small forward preload window for swipe
+feeds. Android uses Media3 `DefaultPreloadManager` over the app's Cronet data
+source; iOS warms one muted AVPlayer and promotes it when selected. `VideoView`
+fills portrait feed cells. Gestures belong to Nexa's generic `Pressable` and
+gesture modifiers, so applications can combine tap, long-press, drag, and pinch
+behavior without coupling gesture APIs to video playback.
 
 | Platform | Playback engine | Adaptive formats |
 |---|---|---|

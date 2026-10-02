@@ -1,0 +1,32 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.notifications"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "13.0"
+        sources: ["ios/Sources/**/*.swift"]
+        frameworks: ["UserNotifications", "UIKit"]
+        applicationDelegate: "NotificationsAppDelegate"
+        entitlements {
+            "aps-environment": "development",
+        }
+    }
+    android {
+        minSdk: 23
+        sources: ["android/src/main/kotlin/**/*.kt"]
+        dependencies: [
+            "androidx.work:work-runtime-ktx:2.11.2",
+            "androidx.core:core-ktx:1.17.0",
+            "com.google.firebase:firebase-messaging:25.1.3",
+        ]
+        permissions: [
+            "android.permission.INTERNET",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.POST_NOTIFICATIONS",
+        ]
+        firebaseMessagingService: "dev.nexa.notifications.NotificationsFirebaseMessagingService"
+    }
+}

@@ -1,0 +1,47 @@
+error NotificationError {
+    permissionDenied
+    invalidIdentifier
+    invalidDelay
+    schedulerUnavailable
+    firebaseNotConfigured
+    remoteRegistrationUnavailable
+}
+
+struct RemoteNotification {
+    identifier: String
+    title: String
+    body: String
+    data: Map<String, String>
+}
+
+/// Schedules notifications owned by this app. Request the core Notifications
+/// permission before scheduling on platforms that require runtime consent.
+native class Notifications {
+    init()
+
+    async fn scheduleLocal(
+        identifier: String,
+        title: String,
+        body: String,
+        delaySeconds: Int64
+    ) throws NotificationError
+
+    async fn isLocalPending(identifier: String) -> Bool throws NotificationError
+    fn cancelLocal(identifier: String)
+    fn cancelAllLocal()
+
+    /// Registers this app with APNs or Firebase Cloud Messaging and returns
+    /// the platform registration token for the app's current installation.
+    async fn registerRemote() -> String throws NotificationError
+
+    event remoteNotificationReceived(notification: RemoteNotification)
+    event remoteNotificationOpened(notification: RemoteNotification)
+    event remoteTokenChanged(token: String)
+}
+
+config {
+    fcmApiKey: String = ""
+    fcmApplicationId: String = ""
+    fcmProjectId: String = ""
+    fcmSenderId: String = ""
+}

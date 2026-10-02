@@ -1,6 +1,5 @@
 import AVFoundation
-import AVKit
-import SwiftUI
+import Foundation
 
 @MainActor
 protocol VideoPlayerEngine: AnyObject {
@@ -9,10 +8,18 @@ protocol VideoPlayerEngine: AnyObject {
     var onEnded: (() -> Void)? { get set }
 
     func prepare(url: URL) async throws(PlayerError) -> Double
+    func preload(url: String, index: Int32)
+    func setPreloadPosition(_ index: Int32)
     func play()
     func pause()
     func seek(position: Double)
     func dispose()
+}
+
+@MainActor
+extension VideoPlayerEngine {
+    func preload(url: String, index: Int32) {}
+    func setPreloadPosition(_ index: Int32) {}
 }
 
 @MainActor
@@ -23,9 +30,16 @@ private final class AVPlayerEngine: VideoPlayerEngine {
     }
     var onEnded: (() -> Void)?
     private var endedObserver: NSObjectProtocol?
+    private var currentPreloadPosition: Int32 = 0
+    private var activeURL: String?
+    private var preloadedPlayers: [String: AVPlayer] = [:]
+    private var preloadedIndexes: [String: Int32] = [:]
+    private var preloadObservers: [String: (AVPlayer, Any)] = [:]
 
     func prepare(url: URL) async throws(PlayerError) -> Double {
-        let item = AVPlayerItem(url: url)
+        let key = url.absoluteString
+        let warmPlayer = preloadedPlayers.removeValue(forKey: key)
+        let item = warmPlayer?.currentItem ?? AVPlayerItem(url: url)
         let mediaDuration: CMTime
         do {
             mediaDuration = try await item.asset.load(.duration)
@@ -34,11 +48,30 @@ private final class AVPlayerEngine: VideoPlayerEngine {
         }
 
         removeEndedObserver()
-        player?.pause()
-        let player = self.player ?? AVPlayer()
-        player.replaceCurrentItem(with: item)
-        player.volume = Float(volume)
-        self.player = player
+        let activePlayer = warmPlayer ?? self.player ?? AVPlayer()
+        if self.player !== activePlayer {
+            if let previousPlayer = self.player {
+                previousPlayer.pause()
+                if let previousURL = activeURL,
+                   currentPreloadPosition > 0,
+                   preloadedPlayers[previousURL] == nil
+                {
+                    preloadedPlayers[previousURL] = previousPlayer
+                    preloadedIndexes[previousURL] = currentPreloadPosition - 1
+                }
+            }
+        }
+        activePlayer.pause()
+        activePlayer.isMuted = false
+        if warmPlayer == nil {
+            activePlayer.replaceCurrentItem(with: item)
+        } else {
+            removePreloadObserver(for: key)
+            await activePlayer.seek(to: .zero)
+        }
+        activePlayer.volume = Float(volume)
+        self.player = activePlayer
+        activeURL = key
         endedObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -49,6 +82,63 @@ private final class AVPlayerEngine: VideoPlayerEngine {
             }
         }
         return mediaDuration.seconds
+    }
+
+    func preload(url: String, index: Int32) {
+        guard index >= currentPreloadPosition + 1,
+              index <= currentPreloadPosition + 2,
+              preloadedPlayers[url] == nil,
+              let candidateURL = URL(string: url),
+              candidateURL.scheme == "https" || candidateURL.scheme == "http"
+        else {
+            return
+        }
+
+        let item = AVPlayerItem(url: candidateURL)
+        item.preferredForwardBufferDuration = 1.5
+        let candidate = AVPlayer(playerItem: item)
+        candidate.isMuted = true
+        candidate.automaticallyWaitsToMinimizeStalling = true
+        preloadedPlayers[url] = candidate
+        preloadedIndexes[url] = index
+        let observer = candidate.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self, weak candidate] time in
+            guard time.seconds >= 1.0,
+                  let self,
+                  let candidate
+            else {
+                return
+            }
+            candidate.pause()
+            candidate.seek(to: .zero)
+            Task { @MainActor [weak self] in
+                self?.removePreloadObserver(for: url)
+            }
+        }
+        preloadObservers[url] = (candidate, observer)
+        candidate.play()
+    }
+
+    func setPreloadPosition(_ index: Int32) {
+        currentPreloadPosition = max(0, index)
+        let staleURLs = preloadedIndexes.compactMap { url, position in
+            position < currentPreloadPosition - 2 || position > currentPreloadPosition + 2 ? url : nil
+        }
+        for url in staleURLs {
+            if let candidate = preloadedPlayers.removeValue(forKey: url) {
+                candidate.pause()
+                candidate.replaceCurrentItem(with: nil)
+            }
+            preloadedIndexes.removeValue(forKey: url)
+            removePreloadObserver(for: url)
+        }
+    }
+
+    private func removePreloadObserver(for url: String) {
+        guard let (candidate, observer) = preloadObservers.removeValue(forKey: url) else { return }
+        candidate.removeTimeObserver(observer)
     }
 
     func play() {
@@ -66,6 +156,15 @@ private final class AVPlayerEngine: VideoPlayerEngine {
     func dispose() {
         player?.pause()
         player?.replaceCurrentItem(with: nil)
+        for candidate in preloadedPlayers.values {
+            candidate.pause()
+            candidate.replaceCurrentItem(with: nil)
+        }
+        for url in preloadObservers.keys {
+            removePreloadObserver(for: url)
+        }
+        preloadedPlayers.removeAll()
+        preloadedIndexes.removeAll()
         removeEndedObserver()
         onEnded = nil
     }
@@ -85,12 +184,14 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
     public var volume: Double {
         didSet { engine.volume = volume }
     }
+    public var looping = false
     public var onEnded: (() -> Void)?
 
-    fileprivate var player: AVPlayer? { engine.player }
+    var player: AVPlayer? { engine.player }
     private var engine: any VideoPlayerEngine
     private var prepareGeneration: UInt64 = 0
     private var isDisposed = false
+    private var preparedURL: String?
 
     public convenience init() {
         self.init(engine: AVPlayerEngine())
@@ -115,23 +216,43 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
             state = .failed
             throw PlayerError.invalidUrl
         }
+        if preparedURL == url.absoluteString,
+           state == .ready || state == .paused || state == .playing {
+            return
+        }
         state = .preparing
         do {
             let preparedDuration = try await engine.prepare(url: url)
             guard generation == prepareGeneration else { return }
+            preparedURL = url.absoluteString
             duration = preparedDuration
             state = .ready
         } catch {
             if generation == prepareGeneration {
+                preparedURL = nil
                 state = .failed
             }
             throw error
         }
     }
 
+    public func preload(_ url: String, _ index: Int32) {
+        engine.preload(url: url, index: index)
+    }
+
+    public func setPreloadPosition(_ index: Int32) {
+        engine.setPreloadPosition(index)
+    }
+
     private func bindEngineEvents(_ engine: any VideoPlayerEngine) {
         engine.onEnded = { [weak self] in
             guard let self else { return }
+            if self.looping {
+                self.engine.seek(position: 0)
+                self.engine.play()
+                self.state = .playing
+                return
+            }
             self.state = .ended
             self.onEnded?()
         }
@@ -158,68 +279,10 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
         guard !isDisposed else { return }
         isDisposed = true
         prepareGeneration &+= 1
+        preparedURL = nil
         onEnded = nil
         engine.onEnded = nil
         engine.dispose()
         state = .idle
     }
 }
-
-/// Native visual implementation used by the generated `VideoView` wrapper.
-/// A production plugin can replace this body with AVPlayerViewController
-/// interoperability while keeping the generated Nexa-facing contract stable.
-public struct VideoViewImpl<Content: View>: View {
-    public let player: VideoPlayer
-    public let controls: Bool
-    public let onTapped: (() -> Void)?
-    public let content: Content
-
-    init(
-        player: VideoPlayer,
-        controls: Bool,
-        softwareDecodingEnabled _: Bool,
-        onTapped: (() -> Void)?,
-        content: Content
-    ) {
-        self.player = player
-        self.controls = controls
-        self.onTapped = onTapped
-        self.content = content
-    }
-
-    public var body: some View {
-        Group {
-#if os(iOS)
-            if let player = player.player {
-                VideoPlayerController(player: player, controls: controls)
-            } else {
-                Color.black
-            }
-#else
-            Color.black
-#endif
-        }
-        .overlay(alignment: .topLeading) { content }
-        .contentShape(Rectangle())
-        .onTapGesture { onTapped?() }
-    }
-}
-
-#if os(iOS)
-private struct VideoPlayerController: UIViewControllerRepresentable {
-    let player: AVPlayer
-    let controls: Bool
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-        controller.showsPlaybackControls = controls
-        return controller
-    }
-
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
-        controller.player = player
-        controller.showsPlaybackControls = controls
-    }
-}
-#endif

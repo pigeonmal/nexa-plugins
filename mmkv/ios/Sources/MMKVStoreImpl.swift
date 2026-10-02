@@ -421,7 +421,7 @@ final class MMKVStoreObserver: NSObject, MMKVHandler, @unchecked Sendable {
     }
 
     func unregister(_ store: MMKVStoreImpl) {
-        lock.withLock {
+        _ = lock.withLock {
             stores.removeValue(forKey: store.instanceID)
         }
     }

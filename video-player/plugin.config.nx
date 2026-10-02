@@ -8,7 +8,7 @@ plugin {
     ios {
         minVersion: "17.0"
         sources: ["ios/Sources/**/*.swift"]
-        frameworks: ["AVFoundation", "AVKit"]
+        frameworks: ["AVFoundation"]
     }
     android {
         minSdk: 23
@@ -17,6 +17,8 @@ plugin {
         aars: ["android/libs/nexa-media3-ffmpeg-decoder-1.11.1.aar"]
         dependencies: [
             "androidx.media3:media3-exoplayer:1.11.1",
+            "androidx.media3:media3-datasource:1.11.1",
+            "androidx.media3:media3-database:1.11.1",
             "androidx.media3:media3-exoplayer-hls:1.11.1",
             "androidx.media3:media3-exoplayer-dash:1.11.1",
             "androidx.media3:media3-datasource-cronet:1.11.1",

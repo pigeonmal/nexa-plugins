@@ -24,8 +24,11 @@ native class VideoPlayer {
     readonly property state: PlayerState
     readonly property duration: Float64
     property volume: Float64
+    property looping: Bool
 
     async fn prepare(url: String) throws PlayerError
+    fn preload(url: String, index: Int32)
+    fn setPreloadPosition(index: Int32)
     fn play()
     fn pause()
     fn seek(position: Float64)
@@ -39,5 +42,4 @@ native component VideoView {
     prop player: VideoPlayer
     prop controls: Bool = true
     prop softwareDecodingEnabled: Bool = true
-    event tapped()
 }

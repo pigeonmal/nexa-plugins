@@ -1,0 +1,23 @@
+config {
+    app {
+        displayName: "SQLiteConformance",
+        version: "0.1.0",
+        buildNumber: 1,
+    }
+    ios {
+        minVersion: "17.0",
+        bundleIdentifier: "dev.nexa.sqlite.conformance",
+    }
+    android {
+        minSdk: 23,
+        targetSdk: 36,
+        applicationId: "dev.nexa.sqlite.conformance",
+    }
+    permissions {}
+    dependencies {
+        SQLite {
+            id: "dev.nexa.sqlite",
+            path: "../../..",
+        }
+    }
+}

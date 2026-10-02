@@ -1,0 +1,149 @@
+plugin "../../../" as Notifications
+
+app NotificationsDemo {
+    let notifications = Notifications()
+
+    state permissionTask: TaskHandle? = null
+    state scheduleTask: TaskHandle? = null
+    state remoteTask: TaskHandle? = null
+    state status = "Allow notifications to schedule a reminder."
+
+    body {
+        OnAppear {
+            notifications.remoteNotificationReceived { notification ->
+                status = "Received: \(notification.title)"
+            }
+            notifications.remoteNotificationOpened { notification ->
+                status = "Opened: \(notification.title)"
+            }
+            notifications.remoteTokenChanged { token ->
+                if token != "" {
+                    status = "Notification token updated."
+                    Log.info(message: "NEXA_NOTIFICATIONS_APNS_TOKEN_CHANGED")
+                }
+            }
+        }
+        Column(spacing: 12, padding: 20) {
+            Text(status)
+            Button("Request permission") {
+                Task.launch(handle: permissionTask, executor: TaskExecutor.Main) {
+                    if await Permissions.request(permission: Notifications) == PermissionStatus.granted {
+                        status = "Permission granted."
+                    } else {
+                        status = "Permission not granted."
+                    }
+                }
+            }
+            Button("Schedule 60 second reminder") {
+                Task.launch(handle: scheduleTask, executor: TaskExecutor.Main) {
+                    try {
+                        await notifications.scheduleLocal(
+                            "nexa-demo-reminder",
+                            "Nexa notification",
+                            "This local reminder was scheduled by Nexa.",
+                            60,
+                        )
+                        if (await notifications.isLocalPending("nexa-demo-reminder")) {
+                            status = "Reminder scheduled."
+                            Log.info(message: "NEXA_NOTIFICATIONS_LOCAL_SCHEDULED_AND_PENDING")
+                        } else {
+                            status = "Reminder schedule was not confirmed."
+                            Log.info(message: "NEXA_NOTIFICATIONS_LOCAL_SCHEDULE_NOT_PENDING")
+                        }
+                    } catch {
+                        case Notifications.NotificationError.permissionDenied {
+                            status = "Grant notification permission first."
+                        }
+                        case Notifications.NotificationError.invalidIdentifier {
+                            status = "Notification identifier is empty."
+                        }
+                        case Notifications.NotificationError.invalidDelay {
+                            status = "Notification delay must be non-negative."
+                        }
+                        case Notifications.NotificationError.schedulerUnavailable {
+                            status = "Notification could not be scheduled."
+                        }
+                        case Notifications.NotificationError.firebaseNotConfigured {
+                            status = "Android Firebase options are missing."
+                        }
+                        case Notifications.NotificationError.remoteRegistrationUnavailable {
+                            status = "Remote notification registration failed."
+                        }
+                    }
+                }
+            }
+            Button("Cancel reminder") {
+                notifications.cancelLocal("nexa-demo-reminder")
+                status = "Checking reminder cancellation."
+                Task.launch(handle: scheduleTask, executor: TaskExecutor.Main) {
+                    try {
+                        if (await notifications.isLocalPending("nexa-demo-reminder")) {
+                            status = "Reminder is still pending."
+                            Log.info(message: "NEXA_NOTIFICATIONS_LOCAL_CANCEL_NOT_CONFIRMED")
+                        } else {
+                            status = "Pending reminder canceled."
+                            Log.info(message: "NEXA_NOTIFICATIONS_LOCAL_CANCELED_AND_VERIFIED")
+                        }
+                    } catch {
+                        case Notifications.NotificationError.invalidIdentifier {
+                            status = "Notification identifier is empty."
+                        }
+                        case Notifications.NotificationError.permissionDenied {
+                            status = "Notification permission is not available."
+                        }
+                        case Notifications.NotificationError.invalidDelay {
+                            status = "Notification delay must be non-negative."
+                        }
+                        case Notifications.NotificationError.schedulerUnavailable {
+                            status = "Cancellation could not be verified."
+                        }
+                        case Notifications.NotificationError.firebaseNotConfigured {
+                            status = "Android Firebase options are missing."
+                        }
+                        case Notifications.NotificationError.remoteRegistrationUnavailable {
+                            status = "Remote notification registration failed."
+                        }
+                    }
+                }
+            }
+            Button("Register for remote notifications") {
+                Task.launch(handle: remoteTask, executor: TaskExecutor.Main) {
+                    if await Permissions.request(permission: Notifications) != PermissionStatus.granted {
+                        status = "Grant notification permission first."
+                    } else {
+                        try {
+                            await notifications.registerRemote()
+                            status = "Remote notification token registered."
+                            Log.info(message: "NEXA_NOTIFICATIONS_APNS_TOKEN_REGISTERED")
+                        } catch {
+                            case Notifications.NotificationError.permissionDenied {
+                                status = "Grant notification permission first."
+                            }
+                            case Notifications.NotificationError.invalidIdentifier {
+                                status = "Notification identifier is empty."
+                            }
+                            case Notifications.NotificationError.invalidDelay {
+                                status = "Notification delay must be non-negative."
+                            }
+                            case Notifications.NotificationError.schedulerUnavailable {
+                                status = "Notification scheduler is unavailable."
+                            }
+                            case Notifications.NotificationError.firebaseNotConfigured {
+                                status = "Android Firebase options are missing."
+                            }
+                            case Notifications.NotificationError.remoteRegistrationUnavailable {
+                                status = "Remote notification registration failed."
+                                Log.info(message: "NEXA_NOTIFICATIONS_APNS_TOKEN_REGISTRATION_FAILED")
+                            }
+                        }
+                    }
+                }
+            }
+            Button("Cancel all reminders") {
+                notifications.cancelAllLocal()
+                status = "All plugin reminders canceled."
+                Log.info(message: "NEXA_NOTIFICATIONS_LOCAL_CANCEL_ALL")
+            }
+        }
+    }
+}

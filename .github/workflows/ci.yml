@@ -48,6 +48,19 @@ jobs:
           print("license metadata consistent (MPL-2.0)")
           EOF
 
+  docs-freshness:
+    name: Catalog table matches the manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The catalog table in README.md restates `ios.minVersion` and
+      # `android.minSdk` from every plugin.config.nx. Those floors decide what an
+      # app must declare, and a hand-copied column drifts: the equivalent table
+      # in the parent repository was wrong for 14 of 16 packages before it was
+      # generated and gated there.
+      - name: Check the catalog table
+        run: python3 scripts/check_catalog_table.py
+
   plugin-check:
     name: Plugin manifest and contract check
     runs-on: ubuntu-latest

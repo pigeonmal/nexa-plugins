@@ -1,31 +1,121 @@
 # `@nexa/audio-player`
 
-One app-wide native audio session for Nexa. It streams URLs through AVPlayer on
-iOS and Media3 ExoPlayer on Android, with system playback controls and track
-metadata.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-AVPlayer%20%2F%20Media3-blue.svg)](https://developer.apple.com/documentation/avfoundation/avplayer)
 
-| Platform | Background playback | System controls |
+Native background audio playback, lock screen metadata (`MPNowPlayingInfoCenter` / `MediaSession`), and hardware media control routing for iOS and Android.
+
+Backed by Apple `AVPlayer` on iOS and AndroidX `Media3` (ExoPlayer) on Android.
+
+---
+
+## 1. Quick Start
+
+```nexa
+plugin "dev.nexa.audio-player" as Audio
+
+component MusicPlayerScreen() {
+    let player = Audio.AudioPlayer()
+    state isPlaying: Bool = false
+    state currentTrack: String = "No track loaded"
+
+    onAppear(() => {
+        loadSong("https://example.com/audio/podcast.mp3")
+    })
+
+    onDisappear(() => {
+        player.dispose()
+    })
+
+    fn loadSong(url: String) {
+        try {
+            await player.prepare(url)
+            player.updateMetadata(title: "Deep Dive Podcast", artist: "Nexa Team", album: "Engineering")
+            currentTrack = "Deep Dive Podcast"
+        } catch Audio.AudioPlayerError as err {
+            print("Failed to load song: \(err)")
+        }
+    }
+
+    fn togglePlayback() {
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+        } else {
+            player.play()
+            isPlaying = true
+        }
+    }
+
+    VStack(spacing: 20) {
+        Text(currentTrack, size: 18, weight: "bold")
+        Button(isPlaying ? "Pause" : "Play", action: () => { togglePlayback() })
+    }
+}
+```
+
+---
+
+## 2. API Reference
+
+### `AudioPlayer` Native Class
+
+App-wide background audio playback manager.
+
+```nexa
+native class AudioPlayer {
+    init()
+}
+```
+
+#### Properties
+
+| Property | Type | Access | Description |
+|---|---|---|---|
+| `state` | `AudioPlaybackState` | Read-only | Current lifecycle state of the playback engine |
+| `duration` | `Float64` | Read-only | Total media duration in seconds (`0.0` if unknown or live stream) |
+| `currentTime` | `Float64` | Read-only | Current playback head position in seconds |
+| `volume` | `Float64` | Read-write | Playback volume scaling factor (`0.0` to `1.0`) |
+
+#### Methods
+
+| Method | Return Type | Description |
 |---|---|---|
-| iOS 17+ | `AVAudioSession` playback category and the generated `audio` background mode | Lock Screen and Control Center through `MPNowPlayingInfoCenter` and remote commands |
-| Android 8+ | Media3 `MediaSessionService` with the `mediaPlayback` foreground service type | Media notification, Android System media controls, and compatible external controllers |
+| `prepare(url: String)` | `Void` | Loads remote URL or local `file://` path. Asynchronously buffers initial stream. |
+| `updateMetadata(title: String, artist: String?, album: String?)` | `Void` | Updates OS lock screen, control center, and notification media notifications. |
+| `play()` | `Void` | Resumes or starts audio playback. |
+| `pause()` | `Void` | Suspends audio playback. |
+| `seek(position: Float64)` | `Void` | Moves playback position head to specified timestamp in seconds. |
+| `dispose()` | `Void` | Halts playback, tears down audio session, and releases system media controls. |
 
-The plugin exposes one shared app session. Multiple `AudioPlayer` handles
-control that same active stream; disposing any handle stops and clears the
-session. Call `prepare` and `play` while the app is foregrounded on Android so
-the operating system can transition playback into its foreground service.
+#### Events
 
-The native platform decoders determine supported formats. Android includes
-Media3's HLS module. URLs may use `http`, `https`, or `file` schemes.
+| Event | Payload | Description |
+|---|---|---|
+| `stateChanged` | `state: AudioPlaybackState` | Fired on playback state transitions (e.g., buffering, playing, paused) |
+| `ended` | — | Fired when playback reaches the end of the media stream |
 
-## Example
+---
 
-The runnable app in [`tests/demo/app/App.nx`](tests/demo/app/App.nx) exercises
-preparation, metadata, playback controls, state events, and typed failures. Its
-sample track is a public MP3; replace the URL with your own stream when needed.
-From that directory, run `nexa check App.nx`, then `nexa test` to compile both
-native hosts or `nexa dev` to launch a development host.
+### Data Structures & Enums
 
-The plugin manifest adds the iOS background audio mode, Android service
-declaration, and Android foreground service permissions to generated hosts.
-Changes to the plugin contract, native implementation, dependencies, or host
-configuration require rebuilding the host.
+#### `AudioPlaybackState`
+
+| State | Description |
+|---|---|
+| `idle` | Player created but no media prepared |
+| `preparing` | Fetching headers and initial audio buffers |
+| `ready` | Media ready for immediate playback |
+| `playing` | Audio actively rendering through speakers/headphones |
+| `paused` | Playback suspended by user or system interruption |
+| `ended` | Playback reached end of stream |
+| `failed` | Unrecoverable network or decoding error |
+
+---
+
+### Error Handling (`AudioPlayerError`)
+
+| Variant | Description |
+|---|---|
+| `invalidUrl` | Malformed URL string or unsupported URL protocol |
+| `playbackFailed(message: String)` | Network error, missing codec, or audio hardware routing failure |

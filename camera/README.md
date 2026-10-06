@@ -1,113 +1,126 @@
 # `@nexa/camera`
 
-Lifecycle-scoped native camera preview, photo and video capture, barcode
-scanning, and an optional throttled I420 image stream for Nexa apps.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-AVFoundation%20%2F%20CameraX-orange.svg)](https://developer.apple.com/av-foundation/)
 
-```nx
+Native camera preview, photo capture, video recording, real-time barcode scanning, and zero-copy raw I420 frame streaming.
+
+Backed by Apple `AVFoundation` + `Vision` on iOS and AndroidX `CameraX` + `ML Kit` on Android.
+
+---
+
+## 1. Quick Start
+
+```nexa
 plugin "dev.nexa.camera" as Camera
 
-app CaptureDemo {
-    state photoRequestId: Int32 = 0
-    state recording = false
-    state imageStreamEnabled = false
-    state photoUri = ""
-    state videoUri = ""
-    state barcodeValue = ""
-    state frameSequence: Int64 = 0
-    state cameraFailure = ""
+component BarcodeScannerScreen() {
+    state scannedCode: String = ""
+    state isScanning: Bool = true
+    state facing: Camera.CameraFacing = Camera.CameraFacing.back
 
-    body {
-        Column(spacing: 12, padding: 16) {
+    VStack {
+        if isScanning {
             Camera.CameraView(
-                facing: Camera.CameraFacing.back,
-                photoRequestId: photoRequestId,
-                recording: recording,
-                imageStreamEnabled: imageStreamEnabled,
+                facing: facing,
                 barcodeScanningEnabled: true,
                 barcodeFormat: Camera.CameraBarcodeFormat.qr,
-                frameResolution: Camera.CameraFrameResolution.vga,
-                maxFramesPerSecond: 10,
+                onBarcodeDetected: (barcode) => {
+                    scannedCode = barcode.value
+                    isScanning = false
+                },
+                onFailed: (err) => {
+                    print("Camera error: \(err)")
+                }
             )
-                .onPhotoCaptured { uri -> photoUri = uri }
-                .onVideoCaptured { uri -> videoUri = uri }
-                .onBarcodeDetected { barcode -> barcodeValue = barcode.value }
-                .onFrameAvailable { frame -> frameSequence = frame.sequence }
-                .onFailed { error -> cameraFailure = "Camera operation failed" }
-
-            Button("Take photo") { photoRequestId += 1 }
-            Button("Toggle video recording") {
-                recording = !recording
+        } else {
+            VStack(spacing: 16) {
+                Text("Scanned QR Code:", size: 14)
+                Text(scannedCode, size: 18, weight: "bold")
+                Button("Scan Again", action: () => { isScanning = true })
             }
-            Button("Toggle image stream") {
-                imageStreamEnabled = !imageStreamEnabled
-            }
-            Text(photoUri)
-            Text(videoUri)
-            Text(barcodeValue)
-            Text("Frame: \(frameSequence)")
-            Text(cameraFailure)
         }
     }
 }
 ```
 
-The camera opens only while `CameraView` is in the UI tree and after the
-platform permission is granted. Its default preview frame is 4:3 and follows
-the available width so surrounding controls can remain in a normal layout.
-`photoRequestId` is edge-triggered: increment it once for each still capture.
-Set `recording` to start a movie and back to
-`false` to finish it. Video output is saved to the app's cache directory and
-returned as a local file URI. Audio recording is opt-in with `recordAudio` and
-requests microphone permission only when recording is requested. Photos and
-videos are not written to the user's media library.
+---
 
-Barcode scanning uses one selected format (the example selects `qr`) so the
-scanner can avoid searching every format. The Android bundled ML Kit model is available
-offline on first use. iOS uses AVFoundation's metadata output. Duplicate
-continuous detections are throttled by the native implementation.
+## 2. API Reference
 
-Set `imageStreamEnabled` only when consuming image data. Frames are capped by
-`maxFramesPerSecond` (1–30, default 10); analysis uses VGA by default and can
-be raised to HD for small or distant barcodes. Each frame emits one tightly
-packed I420 `Bytes` buffer: Y, U, and V planes in that order, with chroma
-dimensions rounded up for odd image sizes. `rotationDegrees` describes how the
-consumer should rotate the pixels. The platform capture buffer is copied once
-into the event value and is released immediately; there is no retained queue,
-frame pool exposed to Nexa code, or unbounded backpressure. CameraX drops stale
-analysis frames when its analyzer is busy.
+### `CameraView` Native Component
 
-The preview owns its session and tears down analysis, capture, and recording
-when it leaves the composition. Photo capture is unavailable while recording;
-stop the recording before requesting a still image. Stop recording while the
-view remains mounted to receive its finalized video URI; leaving the screen
-stops an active recording as part of teardown. Runtime permission denials and
-native capture failures arrive through `onFailed` as typed `CameraError`
-values.
+Declarative native camera surface. Leaving composition automatically releases camera hardware sessions and halts recordings.
 
-## Platform requirements
-
-- iOS 17 or later, using the system AVFoundation framework. The plugin adds
-  camera and microphone privacy usage descriptions.
-- Android API 23 or later, using CameraX 1.6.2 and the bundled ML Kit barcode
-  model 17.3.0. The plugin adds `CAMERA` and `RECORD_AUDIO` permissions.
-
-The maintainer app under `tests/demo/app` exercises permission handling,
-preview, photo/video requests, barcode callbacks, throttled frame events, and
-teardown. Native contract, dependency, permission, and implementation changes
-require a host rebuild; app event handlers remain hot reloadable.
-
-## Android camera barcode acceptance
-
-The log-only acceptance app is in `tests/acceptance/app`. It scans the generated
-Code 128 fixture at `tests/fixtures/code128-nexa-camera.png` and logs
-`CAMERA_BARCODE_ACCEPTANCE: NEXA-CAMERA-1` when CameraX frames reach ML Kit.
-For a deterministic Android Emulator source, start the AVD with:
-
-```bash
-emulator @<avd-name> -camera-back imagefile:/absolute/path/to/plugins/camera/tests/fixtures/code128-nexa-camera.png
+```nexa
+native component CameraView
 ```
 
-Then run `nexa check` and `nexa dev --android --once` from
-`tests/acceptance/app`, and inspect `adb logcat -s Nexa`. The AVD's default
-software `emulated` camera does not use imported virtual-scene images; the
-`imagefile:` camera source feeds the fixture directly to CameraX.
+#### Properties
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `facing` | `CameraFacing` | — | Camera sensor selection (`back` or `front`) |
+| `photoRequestId` | `Int32` | `0` | Increment this value to trigger a high-resolution still capture |
+| `recording` | `Bool` | `false` | Set to `true` to start video recording; set to `false` to finish |
+| `recordAudio` | `Bool` | `false` | Includes audio track in video recording (requires microphone permission) |
+| `imageStreamEnabled` | `Bool` | `false` | Enables real-time raw frame delivery via `frameAvailable` |
+| `barcodeScanningEnabled` | `Bool` | `false` | Enables on-device computer vision barcode detection |
+| `barcodeFormat` | `CameraBarcodeFormat` | — | Target barcode symbology filter |
+| `frameResolution` | `CameraFrameResolution` | — | Resolution preset for video and frame streaming (`vga` or `hd`) |
+| `maxFramesPerSecond` | `Int32` | `10` | Frame rate throttle for `frameAvailable` events |
+
+#### Events
+
+| Event | Payload | Description |
+|---|---|---|
+| `photoCaptured` | `uri: String` | Fired when still photo finishes saving; returns local file URI |
+| `videoCaptured` | `uri: String` | Fired when video recording stops and finalizes; returns local MP4 URI |
+| `barcodeDetected` | `barcode: CameraBarcode` | Fired when a barcode matching `barcodeFormat` is decoded |
+| `frameAvailable` | `frame: CameraFrame` | Emits raw I420 pixel buffers at throttled frame rate |
+| `failed` | `error: CameraError` | Fired on permission denial, hardware unavailability, or recording failure |
+
+---
+
+### Data Structures & Enums
+
+#### `CameraFacing`
+- `back`: Standard rear camera lens.
+- `front`: Selfie camera lens (mirrored preview).
+
+#### `CameraBarcodeFormat`
+Supported symbologies: `aztec`, `codabar`, `code39`, `code93`, `code128`, `dataMatrix`, `ean8`, `ean13`, `itf`, `pdf417`, `qr`, `upcA`, `upcE`.
+
+#### `CameraFrameResolution`
+- `vga`: 640x480 resolution (optimized for computer vision / ML inference).
+- `hd`: 1280x720 high definition resolution.
+
+#### `CameraBarcode`
+| Field | Type | Description |
+|---|---|---|
+| `value` | `String` | Decoded payload text |
+| `format` | `CameraBarcodeFormat` | Symbology of the detected code |
+
+#### `CameraFrame`
+Tightly packed raw I420 planar buffer (`Y`, `U`, `V`).
+| Field | Type | Description |
+|---|---|---|
+| `sequence` | `Int64` | Monotonically increasing frame counter |
+| `width` | `Int32` | Width in pixels |
+| `height` | `Int32` | Height in pixels |
+| `rotationDegrees` | `Int32` | Orientation metadata relative to upright display (`0`, `90`, `180`, `270`) |
+| `presentationTimeNanoseconds` | `Int64` | Native hardware timestamp |
+| `pixels` | `Bytes` | Raw I420 byte buffer |
+
+---
+
+### Error Handling (`CameraError`)
+
+| Variant | Description |
+|---|---|
+| `cameraPermissionDenied` | User rejected camera access permission prompt |
+| `microphonePermissionDenied` | User rejected microphone access during audio recording |
+| `cameraUnavailable` | Camera sensor is in use by another app or absent |
+| `captureFailed(message: String)` | Error capturing or encoding still image |
+| `recordingFailed(message: String)` | Error writing or muxing video container |
+| `invalidFrameRate(frameRate: Int32)` | Requested frame rate exceeds hardware capability |

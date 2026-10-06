@@ -1,48 +1,90 @@
 # `@nexa/biometrics`
 
-User-triggered biometric authentication through iOS LocalAuthentication and
-Android's system BiometricPrompt.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Security](https://img.shields.io/badge/Security-Face%20ID%20%2F%20BiometricPrompt-brightgreen.svg)](https://developer.apple.com/documentation/localauthentication)
+
+Secure biometric authentication for iOS and Android.
+
+Backed by Apple `LocalAuthentication` (Face ID / Touch ID) on iOS and AndroidX `BiometricPrompt` on Android.
+
+---
+
+## 1. Quick Start
 
 ```nexa
 plugin "dev.nexa.biometrics" as Biometrics
 
-app BiometricDemo {
-    state authenticated = false
-    state failed = false
+component SecureVaultScreen() {
+    state isUnlocked: Bool = false
+    state errorMessage: String? = null
 
-    body {
-        Column(spacing: 12) {
+    VStack(spacing: 24) {
+        if isUnlocked {
+            Text("Vault Unlocked", size: 20, color: "#34C759")
+            Text("Secret documents are now accessible.")
+        } else {
+            Text("Authentication Required", size: 18, weight: "bold")
+            
             Biometrics.BiometricButton(
-                title: "Unlock",
-                reason: "Confirm your identity to continue"
+                title: "Unlock with Face ID",
+                reason: "Authenticate to view encrypted credentials",
+                onAuthenticated: () => {
+                    isUnlocked = true
+                    errorMessage = null
+                },
+                onFailed: (failure) => {
+                    errorMessage = "Authentication failed: \(failure)"
+                }
             )
-                .onAuthenticated { authenticated = true }
-                .onFailed { error -> failed = true }
 
-            if authenticated {
-                Text("Authenticated")
-            }
-            if failed {
-                Text("Authentication was not completed")
+            if let err = errorMessage {
+                Text(err, color: "#FF3B30", size: 14)
             }
         }
     }
 }
 ```
 
-`BiometricButton` starts the system prompt only after the user taps it. Its
-`onAuthenticated` event reports success. `onFailed` carries a
-`BiometricFailure` enum, including unavailable hardware, missing enrollment,
-lockout, user or system cancellation, and invalid context. The Android prompt
-remains open after an unrecognized scan so the user can retry. Leaving the
-component cancels an active prompt.
+---
 
-iOS uses the device's enrolled Face ID or Touch ID through
-`LAContext.deviceOwnerAuthenticationWithBiometrics`; the plugin contributes
-`NSFaceIDUsageDescription` to the host Info.plist. Android uses the platform
-`android.hardware.biometrics.BiometricPrompt`, requires API 28+, and declares
-`USE_BIOMETRIC`. Set the app's Android `minSdk` to at least 28 when using this
-plugin; Nexa rejects a plugin minimum above the app minimum.
+## 2. API Reference
 
-The plugin does not store biometric data or treat biometrics as a replacement
-for the app's account credentials.
+### `BiometricButton` Native Component
+
+User-triggered native authentication control. Initiating authentication requires explicit user tap interaction, ensuring compliance with Apple App Store Review and Android security invariants.
+
+```nexa
+native component BiometricButton
+```
+
+#### Properties
+
+| Prop | Type | Description |
+|---|---|---|
+| `title` | `String` | Visual label displayed on the trigger button |
+| `reason` | `String` | System dialog subtitle explaining why the biometric check is requested |
+
+#### Events
+
+| Event | Payload | Description |
+|---|---|---|
+| `authenticated` | — | Fired when Face ID, Touch ID, or fingerprint authentication succeeds |
+| `failed` | `error: BiometricFailure` | Fired when biometric check is rejected, canceled, or unavailable |
+
+---
+
+### Data Structures & Enums
+
+#### `BiometricFailure`
+
+| Variant | Description |
+|---|---|
+| `notAvailable` | Device lacks biometric hardware support |
+| `notEnrolled` | Biometric hardware present but no faces or fingerprints are registered in OS |
+| `lockout` | Too many failed attempts; OS temporarily disabled biometric sensor |
+| `userCanceled` | User explicitly dismissed the biometric prompt |
+| `systemCanceled` | System interrupted prompt (e.g., incoming call or app backgrounding) |
+| `authenticationFailed` | Biometric match failed (unrecognized face or fingerprint) |
+| `passcodeNotSet` | Device has no lock screen PIN or passcode configured |
+| `invalidContext` | Underlying native context was destroyed |
+| `unknown` | Unspecified native OS authentication error |

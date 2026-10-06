@@ -1,62 +1,96 @@
 # `@nexa/maps`
 
-Native interactive maps for Nexa apps: Apple MapKit on iOS and Google Maps on
-Android. `MapView` accepts a center coordinate, a zoom level, and a typed list
-of pins. Selecting a pin emits its `id` through `onPinSelected`.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-MapKit%20%2F%20Google%20Maps-brightgreen.svg)](https://developer.apple.com/documentation/mapkit)
+
+Native interactive vector map view with annotations, centering, and pin selection events.
+
+Backed by Apple `MapKit` (`MKMapView`) on iOS and Google Play Services Maps (`MapView`) on Android.
+
+---
+
+## 1. Quick Start
 
 ```nexa
 plugin "dev.nexa.maps" as Maps
 
-Maps.MapView(
-    centerLatitude: 48.8584,
-    centerLongitude: 2.2945,
-    pins: [
-        Maps.MapPin("eiffel", "Eiffel Tower", 48.8584, 2.2945),
-        Maps.MapPin("louvre", "The Louvre", 48.8606, 2.3376),
-    ],
-) onPinSelected { pinId ->
-    Log.info(message: "MAP_PIN_SELECTED:\(pinId)")
+component StoreLocatorScreen() {
+    state selectedStoreId: String? = null
+    state storePins: Array<Maps.MapPin> = [
+        Maps.MapPin(id: "store_1", title: "Downtown Flagship", latitude: 37.7749, longitude: -122.4194),
+        Maps.MapPin(id: "store_2", title: "Mission Branch", latitude: 37.7599, longitude: -122.4148)
+    ]
+
+    VStack {
+        Maps.MapView(
+            centerLatitude: 37.7749,
+            centerLongitude: -122.4194,
+            zoom: 13.0,
+            pins: storePins,
+            onPinSelected: (id) => {
+                selectedStoreId = id
+            }
+        )
+
+        if let id = selectedStoreId {
+            HStack {
+                Text("Selected Location: \(id)", weight: "bold")
+            }
+            .padding(16)
+        }
+    }
 }
 ```
 
-Pin IDs must be unique. `zoom` defaults to `12` and accepts values from 0 to
-22; values outside that range are clamped by the native implementation.
+---
 
-## Android API key
+## 2. API Reference
 
-Google Maps for Android requires a Google Cloud API key with the Maps SDK for
-Android enabled. The generated manifest reads it from `NEXA_MAPS_API_KEY`; set
-that environment variable when generating or building the Android app:
+### `MapView` Native Component
 
-```sh
-NEXA_MAPS_API_KEY="your-key" nexa dev --android
+```nexa
+native component MapView
 ```
 
-The key is not stored in the plugin package or app source. Restrict it in
-Google Cloud to the app's Android package name and signing certificate. The
-plugin requests internet access and declares the Google Maps key metadata.
-Apple MapKit does not require an app API key.
+#### Properties
 
-## Platform versions
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `centerLatitude` | `Float64` | — | Initial coordinate latitude center in degrees |
+| `centerLongitude` | `Float64` | — | Initial coordinate longitude center in degrees |
+| `zoom` | `Float64` | `12.0` | Camera zoom level (`1.0` is entire globe, `20.0` is street level) |
+| `pins` | `Array<MapPin>` | `[]` | List of typed point annotations placed on the map |
 
-- iOS 17 or later (MapKit)
-- Android API 23 or later (Google Maps Compose 8.6.0, using Maps SDK 20.0.0)
+#### Events
 
-## Conformance
+| Event | Payload | Description |
+|---|---|---|
+| `pinSelected` | `id: String` | Fired when user taps any pin annotation marker |
 
-```sh
-nexa plugin check plugins/maps
-(cd plugins/maps/tests/conformance/app && nexa check)
-(cd plugins/maps/tests/conformance/app && nexa dev --ios --once)
-(cd plugins/maps/tests/conformance/app && NEXA_MAPS_API_KEY="your-key" nexa dev --android --once)
+---
+
+### Data Structures
+
+#### `MapPin`
+| Field | Type | Description |
+|---|---|---|
+| `id` | `String` | Unique identifier for marker callback disambiguation |
+| `title` | `String` | Text callout label displayed above the marker pin |
+| `latitude` | `Float64` | Geographic latitude in degrees |
+| `longitude` | `Float64` | Geographic longitude in degrees |
+
+---
+
+## 3. Platform Setup
+
+For Android builds, provide your Google Maps API key in your Android manifest or `nexa.config.nx`:
+
+```nexa
+app MyApp {
+    android: {
+        manifestPlaceholders: {
+            "googleMapsApiKey": "AIzaSy..."
+        }
+    }
+}
 ```
-
-The iOS pin-selection runtime check uses UI automation and Simulator logs only:
-
-```sh
-NEXA_IOS_SIMULATOR_ID="<booted-simulator-id>" plugins/maps/tests/acceptance/ios-map-pin-selection.sh
-```
-
-If `NEXA_IOS_SIMULATOR_ID` is omitted, the script selects the first booted
-iOS Simulator. Android tile and pin-selection acceptance still requires a
-configured Maps SDK key and a device image with Google Play services.

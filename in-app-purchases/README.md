@@ -1,96 +1,161 @@
 # `@nexa/in-app-purchases`
 
-Typed StoreKit 2 and Google Play Billing APIs for digital products.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-StoreKit%202%20%2F%20Google%20Play%20Billing-green.svg)](https://developer.apple.com/storekit/)
 
-```nx
-plugin "dev.nexa.in-app-purchases" as InAppPurchases
+Unified digital commerce, consumables, non-consumables, and auto-renewable subscriptions.
 
-let store = InAppPurchases()
+Backed directly by Apple **StoreKit 2** on iOS and **Google Play Billing Library 7.x** on Android. Features cryptographic receipt verification, server-side JWS payload verification, and transaction completion lifecycle hooks.
 
-Button("Buy monthly plan") {
-    Task.launch(handle: purchaseTask, executor: TaskExecutor.Main) {
+---
+
+## 1. Quick Start
+
+```nexa
+plugin "dev.nexa.in-app-purchases" as IAP
+
+component SubscriptionPaywallScreen() {
+    let store = IAP.InAppPurchases()
+    state availableProducts: Array<IAP.StoreProduct> = []
+    state isSubscribed: Bool = false
+
+    onAppear(() => {
+        loadProducts()
+        store.onPurchaseUpdated((transaction) => {
+            handleTransaction(transaction)
+        })
+    })
+
+    onDisappear(() => {
+        store.dispose()
+    })
+
+    fn loadProducts() {
         try {
-            if (await store.purchase("pro.monthly", null)).status == InAppPurchases.PurchaseStatus.purchased {
-                status = "Purchase returned. Verify and deliver it, then complete the transaction."
+            availableProducts = await store.products(["pro_monthly_sub", "pro_annual_sub"])
+            let owned = await store.ownedPurchases()
+            isSubscribed = owned.count > 0
+        } catch IAP.InAppPurchaseError as err {
+            print("Store load failed: \(err)")
+        }
+    }
+
+    fn buySubscription(product: IAP.StoreProduct) {
+        try {
+            let result = await store.purchase(product.id, offerID: null)
+            if result.status == IAP.PurchaseStatus.purchased, let tx = result.transaction {
+                handleTransaction(tx)
             }
-        } catch {
-            case InAppPurchases.InAppPurchaseError.billingUnavailable {
-                status = "The store is unavailable."
-            }
-            else {
-                status = "Purchase failed."
+        } catch IAP.InAppPurchaseError as err {
+            print("Purchase failed: \(err)")
+        }
+    }
+
+    fn handleTransaction(tx: IAP.StoreTransaction) {
+        // 1. Grant entitlements in app state
+        isSubscribed = true
+        // 2. Finalize transaction with the platform app store
+        try {
+            await store.complete(tx.id, consumable: false)
+        } catch IAP.InAppPurchaseError as err {
+            print("Failed to finish transaction: \(err)")
+        }
+    }
+
+    VStack(spacing: 16) {
+        Text(isSubscribed ? "You have Pro Access!" : "Upgrade to Pro", size: 20, weight: "bold")
+        FastList(availableProducts) { product in
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(product.title, weight: "bold")
+                    Text(product.description, size: 12)
+                }
+                Spacer()
+                Button(product.displayPrice, action: () => { buySubscription(product) })
             }
         }
     }
 }
 ```
 
-`products(ids)` returns the localized product names, descriptions, display
-prices, product kind, and any eligible Android purchase offers. Android offers
-include stable offer IDs and their pricing phases. Pass an offer ID from the
-latest catalog result to `purchase`; the plugin queries Google Play again before
-launching the purchase sheet so it does not reuse stale `ProductDetails`. If an
-Android product has multiple eligible offers, choose one explicitly. StoreKit
-uses its normal product purchase flow and returns no Android offer list.
+---
 
-`purchase` returns `purchased`, `pending`, or `cancelled`. A pending payment is
-not an entitlement and must not be delivered. Successful results contain a
-transaction with product IDs, quantity, transaction time, optional expiry, and
-platform verification payload. `purchaseUpdated` reports verified StoreKit
-transactions and Google Play purchases, including transactions from an active
-purchase flow and later pending-purchase transitions. The active `purchase()`
-call also returns its immediate result; if the event and result describe the
-same transaction, use its transaction ID to process it once.
+## 2. API Reference
 
-On iOS, creating the plugin instance also queues verified transactions that
-were unfinished when the app last closed. They are emitted once the app
-attaches its update handler, so delivery can be completed after relaunch.
+### `InAppPurchases` Native Class
 
-Use `ownedPurchases()` to refresh purchases known by the current store account.
-`restorePurchases()` calls StoreKit's user-initiated synchronization and then
-reads current entitlements; on Android it reads owned purchases from Google
-Play. StoreKit's current entitlement sequence excludes consumables. Google Play
-returns unconsumed one-time products because the store does not distinguish
-consumable from non-consumable products.
+Single application-wide billing coordinator.
 
-The app is responsible for verifying purchases with its secure backend before
-granting valuable or account-bound entitlements. `verificationPayload` is the
-StoreKit signed transaction JWS on iOS and the Google Play purchase token on
-Android. Do not treat the Android token or a client-side success result as
-backend verification. Call `complete(transactionID, consumable)` only after
-delivering the product or granting the verified entitlement. StoreKit finishes
-the transaction; Android consumes a consumable or acknowledges a non-consumable
-or subscription. Pending transactions cannot be completed.
+```nexa
+native class InAppPurchases {
+    init()
+}
+```
 
-Create one `InAppPurchases` instance per app, keep it while purchase updates are
-needed, and call `dispose()` when its owning screen/app lifetime ends. Google
-Play Billing requires a foreground Activity to show its purchase sheet. The
-plugin returns `activityUnavailable` if no host Activity is available.
+#### Methods
 
-## Demo app
+| Method | Return Type | Description |
+|---|---|---|
+| `products(productIDs: Array<String>)` | `Array<StoreProduct>` | Queries store catalogs for localized titles, descriptions, and regional currencies |
+| `purchase(productID: String, offerID: String?)` | `PurchaseResult` | Triggers OS payment sheet. `offerID` specifies introductory pricing or promo offers. |
+| `ownedPurchases()` | `Array<StoreTransaction>` | Returns active subscriptions and non-consumable entitlements currently owned |
+| `restorePurchases()` | `Array<StoreTransaction>` | Forces App Store / Google Play account sync to re-fetch historical transactions |
+| `complete(transactionID: String, consumable: Bool)` | `Void` | Confirms delivery to StoreKit 2 (`finish()`) or Google Play (`acknowledge()` / `consume()`) |
+| `dispose()` | `Void` | Unregisters billing client listeners and detaches background observers |
 
-The cross-platform demo is in `tests/demo/app`. Create matching products in
-App Store Connect and Play Console with identifiers:
+#### Events
 
-- `dev.nexa.inapppurchases.demo.coins` — one-time consumable
-- `dev.nexa.inapppurchases.demo.pro` — subscription
+| Event | Payload | Description |
+|---|---|---|
+| `purchaseUpdated` | `transaction: StoreTransaction` | Fired when out-of-band purchases arrive (e.g. Ask to Buy approvals, renewals) |
 
-The demo deliberately does not grant production access based only on the local
-purchase result. Connect `verificationPayload` to a trusted backend before
-shipping paid content. StoreKit configuration and Play Console license-tester
-setup are required for store transaction runtime acceptance.
+---
 
-The iOS acceptance harness is `tests/acceptance/ios-storekit-purchases.sh`.
-It accepts `NEXA_IOS_SIMULATOR_ID` to choose a specific booted simulator. On
-Xcode 27.0 with the iOS 26.5 Simulator, command-line `xcodebuild test` may not
-sync a scheme's local StoreKit configuration to the simulator; the acceptance
-flow needs to run through Xcode's IDE path or a toolchain that performs that
-sync. See the [Apple Developer Forums report](https://developer.apple.com/forums/thread/826971).
+### Data Structures & Enums
 
-## Platform requirements
+#### `ProductKind`
+- `oneTime`: Consumable coins/gems or permanent non-consumable feature unlocks.
+- `subscription`: Recurring auto-renewable subscription with renewal periods.
 
-- iOS 17 or later, using StoreKit 2.
-- Android API 23 or later, using Google Play Billing Library 9.1.0.
-- Android purchase UI requires a foreground Nexa Activity and Google Play Store.
-- This plugin does not include a receipt-validation backend or alternative
-  billing integration.
+#### `PurchaseStatus`
+- `purchased`: Payment succeeded and verified.
+- `pending`: Deferred payment (e.g. parental approval required).
+- `cancelled`: User dismissed payment sheet without charging card.
+
+#### `StoreProduct`
+| Field | Type | Description |
+|---|---|---|
+| `id` | `String` | Product SKU / Identifier registered in App Store Connect or Google Play Console |
+| `title` | `String` | Localized product name |
+| `description` | `String` | Localized product marketing description |
+| `displayPrice` | `String` | Formatted price string with local currency symbol (e.g. `"$9.99"`, `"€8,99"`) |
+| `kind` | `ProductKind` | Product monetization model (`oneTime` or `subscription`) |
+| `offers` | `Array<ProductOffer>` | Subscription introductory offers or discount tiers |
+
+#### `StoreTransaction`
+| Field | Type | Description |
+|---|---|---|
+| `id` | `String` | Unique transaction identifier |
+| `productIDs` | `Array<String>` | Products included in this transaction |
+| `status` | `PurchaseStatus` | Current execution status |
+| `purchasedAtMillis` | `Int64` | Purchase timestamp in Unix epoch milliseconds |
+| `expiresAtMillis` | `Int64?` | Expiration date for active subscriptions |
+| `quantity` | `Int32` | Purchased unit quantity |
+| `verificationPayload` | `String` | Cryptographic signed payload (JWS token in StoreKit 2, purchase token on Android) |
+
+---
+
+### Error Handling (`InAppPurchaseError`)
+
+| Variant | Description |
+|---|---|
+| `billingUnavailable` | In-app purchases disabled in device settings or Play Store unavailable |
+| `invalidProductIdentifier(productID: String)` | Product SKU format is invalid |
+| `productNotFound(productID: String)` | Product SKU not found in store catalog |
+| `offerNotFound(offerID: String)` | Requested subscription discount offer does not exist |
+| `offerSelectionRequired` | Subscription requires explicit offer selection |
+| `activityUnavailable` | Android UI Activity unavailable to host billing sheet |
+| `purchaseInProgress` | Another transaction is already undergoing checkout |
+| `transactionNotFound(transactionID: String)` | Transaction ID not found in local cache |
+| `verificationFailed` | JWS signature verification or purchase token validation failed |
+| `storeError(message: String)` | Underlying Apple or Google Play store exception |

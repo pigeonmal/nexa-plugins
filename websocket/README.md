@@ -1,96 +1,122 @@
-# WebSocket
+# `@nexa/websocket`
 
-Native text and binary WebSockets for Nexa apps.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-URLSession%20%2F%20OkHttp-blue.svg)](https://developer.apple.com/documentation/foundation/urlsessionwebsockettask)
+
+High-performance native text and binary WebSockets over standard RFC 6455.
+
+Backed by Apple `URLSessionWebSocketTask` on iOS and Square `OkHttp` on Android. Zero JavaScript bridges, direct socket multiplexing, and support for binary byte buffers.
+
+---
+
+## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.websocket" as WebSocket
+plugin "dev.nexa.websocket" as Net
 
-let socket = WebSocket.WebSocket("wss://echo.websocket.events")
+component LiveChatScreen() {
+    let socket = Net.WebSocket("wss://chat.example.com/live")
+    state messages: Array<String> = []
+    state inputMessage: String = ""
 
-app Chat {
-    state message = "Hello from Nexa"
-    state received = ""
-    state connection = "Idle"
-    state failure = ""
+    onAppear(() => {
+        setupSocket()
+    })
 
-    body {
-        OnAppear async {
-            socket.stateChanged { current ->
-                connection = "Connection state changed"
-            }
-            socket.messageReceived { text ->
-                received = text
-            }
-            socket.failed { error ->
-                failure = error
-            }
-            try {
-                await socket.connect()
-            } catch {
-                case WebSocket.WebSocketError.invalidUrl {
-                    failure = "The WebSocket URL is invalid."
-                }
-                case WebSocket.WebSocketError.alreadyConnected {
-                    failure = "This WebSocket was already started."
-                }
-            }
+    onDisappear(() => {
+        socket.close()
+        socket.dispose()
+    })
+
+    fn setupSocket() {
+        socket.onMessageReceived((text) => {
+            messages = [...messages, text]
+        })
+
+        socket.onStateChanged((state) => {
+            print("Socket state: \(state)")
+        })
+
+        try {
+            await socket.connect()
+        } catch Net.WebSocketError as err {
+            print("Connection error: \(err)")
         }
+    }
 
-        OnDisappear {
-            socket.dispose()
+    fn sendMessage() {
+        if inputMessage != "" {
+            socket.send(inputMessage)
+            inputMessage = ""
         }
+    }
 
-        Column(spacing: 12) {
-            Text(connection)
-            Text(received)
-            Text(failure)
-            Button("Send") {
-                if (socket.send(message)) {
-                    connection = "Message queued"
-                } else {
-                    connection = "Not connected"
-                }
-            }
+    VStack(spacing: 12) {
+        FastList(messages) { msg in
+            Text(msg, size: 14)
+        }
+        HStack {
+            TextInput("Type message...", text: inputMessage)
+            Button("Send", action: () => { sendMessage() })
         }
     }
 }
 ```
 
-## API behavior
+---
 
-- `connect()` validates the URL and starts the native handshake. It returns after
-  starting the connection; observe `stateChanged`, `failed`, and the current
-  `state` for the handshake result.
-- `send(text)` and `sendBytes(bytes)` return `false` unless the connection is
-  open or the platform rejects the local enqueue. `true` means accepted by the
-  local networking client; it does not mean the peer received the message.
-- `messageReceived` and `binaryReceived` deliver incoming WebSocket messages.
-- `close()` starts a normal RFC 6455 close handshake. `dispose()` cancels work
-  and releases the instance's callbacks and native connection resources.
-- Register event handlers before calling `connect()` to observe every state
-  transition. Native callbacks are delivered on the main thread on both
-  platforms.
+## 2. API Reference
 
-## Platform implementation
+### `WebSocket` Native Class
 
-- iOS uses `URLSessionWebSocketTask` and callback-based APIs, so the plugin keeps
-  its iOS deployment minimum at 13.0.
-- iOS reuses one `URLSession` for plugin sockets and routes delegate callbacks by
-  task identifier. Each socket still owns and removes its callbacks and task.
-- Android uses the isolated OkHttp WebSocket client dependency, version 5.5.0,
-  with Android API 21 or later. The app's effective minimum API remains the
-  higher of the app and plugin requirements. The dependency is Apache-2.0.
-- One shared OkHttp client reuses its dispatcher and configuration. Each
-  `WebSocket` owns its upgraded connection, callbacks, and close lifecycle.
+```nexa
+native class WebSocket {
+    init(url: String)
+}
+```
 
-## DevRuntime and imported screens
+#### Properties
 
-The demo keeps the socket screen in `tests/demo/app/screens/Chat.nx` and imports
-it from `App.nx`. Nexa's development host links configured plugin adapters up
-front, so edits or newly imported `.nx` screens can use an already configured
-WebSocket plugin through hot reload. The `.nx` source is compiled into the app
-and is not copied into the generated native app bundle.
+| Property | Type | Access | Description |
+|---|---|---|---|
+| `state` | `WebSocketState` | Read-only | Current lifecycle status of the socket connection |
 
-Changes to the plugin's native sources or contract, adding a plugin dependency,
-or changing platform permissions and minimum versions changes the native host
-and requires a rebuild.
+#### Methods
+
+| Method | Return Type | Description |
+|---|---|---|
+| `connect()` | `Void` | Initiates WebSocket HTTP upgrade handshake. Throws on invalid scheme. |
+| `send(text: String)` | `Bool` | Queues UTF-8 text frame into native socket buffer. Returns `true` if accepted by queue. |
+| `sendBytes(bytes: Bytes)` | `Bool` | Queues binary frame into native socket buffer. |
+| `close()` | `Void` | Performs normal RFC 6455 close handshake (Code 1000). |
+| `dispose()` | `Void` | Forcibly terminates socket task, closes network sockets, and unregisters listeners. |
+
+#### Events
+
+| Event | Payload | Description |
+|---|---|---|
+| `stateChanged` | `state: WebSocketState` | Fired when connection transitions between handshake, open, closing, or closed |
+| `messageReceived` | `text: String` | Fired upon arrival of a completed UTF-8 text message |
+| `binaryReceived` | `bytes: Bytes` | Fired upon arrival of a binary message buffer |
+| `failed` | `message: String` | Fired on transport aborts, DNS errors, or protocol violations |
+
+---
+
+### Data Structures & Enums
+
+#### `WebSocketState`
+- `idle`: Socket instantiated but `connect()` has not been called.
+- `connecting`: TCP handshake and HTTP upgrade in progress.
+- `open`: Two-way bidirectional communication active.
+- `closing`: Close frame sent or received; socket awaiting teardown.
+- `closed`: Socket cleanly disconnected.
+- `failed`: Terminal network or protocol error.
+
+---
+
+### Error Handling (`WebSocketError`)
+
+| Variant | Description |
+|---|---|
+| `invalidUrl` | URL must specify a valid `ws://` or `wss://` URI |
+| `alreadyConnected` | Cannot call `connect()` on a socket that is already connected or connecting |

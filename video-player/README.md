@@ -1,67 +1,129 @@
 # `@nexa/video-player`
 
-Native video playback for Nexa. The plugin exposes independent `VideoPlayer`
-instances, typed playback state and errors, an `ended` event, and a `VideoView`
-with native playback controls. `VideoPlayer.preload(url, index)` and
-`setPreloadPosition(index)` maintain a small forward preload window for swipe
-feeds. Android uses Media3 `DefaultPreloadManager` over the app's Cronet data
-source; iOS warms one muted AVPlayer and promotes it when selected. `VideoView`
-fills portrait feed cells. Gestures belong to Nexa's generic `Pressable` and
-gesture modifiers, so applications can combine tap, long-press, drag, and pinch
-behavior without coupling gesture APIs to video playback.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-AVPlayer%20%2F%20Media3%20(ExoPlayer)-red.svg)](https://developer.apple.com/documentation/avfoundation/avplayer)
 
-| Platform | Playback engine | Adaptive formats |
+Native video playback surface with hardware acceleration, forward stream preloading, HLS/DASH streaming, and custom controls.
+
+Backed by Apple `AVPlayer` + `AVPlayerLayer` on iOS and AndroidX `Media3` (ExoPlayer) with optional Google Cronet networking on Android.
+
+---
+
+## 1. Quick Start
+
+```nexa
+plugin "dev.nexa.video-player" as Video
+
+component FeedVideoPlayer(videoUrl: String) {
+    let player = Video.VideoPlayer()
+
+    onAppear(() => {
+        try {
+            await player.prepare(videoUrl)
+            player.looping = true
+            player.play()
+        } catch Video.PlayerError as err {
+            print("Video error: \(err)")
+        }
+    })
+
+    onDisappear(() => {
+        player.dispose()
+    })
+
+    VStack {
+        Video.VideoView(
+            player: player,
+            controls: true,
+            softwareDecodingEnabled: true
+        )
+    }
+}
+```
+
+---
+
+## 2. API Reference
+
+### `VideoPlayer` Native Class
+
+Controls media decoding, playback state, and forward preloading queues.
+
+```nexa
+native class VideoPlayer {
+    init()
+}
+```
+
+#### Properties
+
+| Property | Type | Access | Description |
+|---|---|---|---|
+| `state` | `PlayerState` | Read-only | Current state of playback engine |
+| `duration` | `Float64` | Read-only | Duration of loaded video in seconds |
+| `volume` | `Float64` | Read-write | Audio volume scaling factor (`0.0` to `1.0`) |
+| `looping` | `Bool` | Read-write | When `true`, automatically seeks to `0.0` on completion |
+
+#### Methods
+
+| Method | Return Type | Description |
 |---|---|---|
-| iOS | AVPlayer | HLS |
-| Android | Media3 ExoPlayer with Nexa's LGPL-only FFmpeg fallback | HLS and DASH |
+| `prepare(url: String)` | `Void` | Initializes video pipeline with target URL or local file path |
+| `preload(url: String, index: Int32)` | `Void` | Buffers subsequent video into forward cache queue at specific index |
+| `setPreloadPosition(index: Int32)` | `Void` | Advances active playback queue to preloaded index |
+| `play()` | `Void` | Starts or resumes video rendering |
+| `pause()` | `Void` | Pauses video rendering |
+| `seek(position: Float64)` | `Void` | Seeks playback head to specified second timestamp |
+| `dispose()` | `Void` | Frees video decoder, surfaces, and active network connections |
 
-On iOS, playback uses Apple's AVPlayer and its native decoder. On Android,
-`softwareDecodingEnabled: false` disables the FFmpeg extension renderer; the
-default is `true`. The FFmpeg renderer is appended after Media3's platform
-renderer, so it is selected only when the platform renderer cannot handle the
-stream. Android uses an LGPL-only FFmpeg 9.0.2 build with GPL, LGPLv3, and
-nonfree components disabled. The decoder is packaged as separate replaceable
-shared libraries; its source archive, configure checks, and notices are under
-[`android/ffmpeg-decoder`](android/ffmpeg-decoder). Android uses the app-packaged
-Cronet provider for media requests and shares its Cronet engine between player
-instances.
+#### Events
 
-The FFmpeg fallback uses the upstream LGPL 2.1-or-later license, not NextLib or
-GPL FFmpeg components. The wrapper code is Apache-2.0. App distributors that
-ship the Android decoder binaries must include the required notices and make
-the corresponding FFmpeg source and build information available. The exact
-unmodified FFmpeg source archive and build recipe are included under
-`android/ffmpeg-decoder`; see its third-party notices and the
-[FFmpeg licensing guidance](https://ffmpeg.org/legal.html).
+| Event | Description |
+|---|---|
+| `ended` | Fired when non-looping video finishes playing to the end |
 
-On Android 8.0 and later, PiP starts when the user backgrounds the app while
-exactly one attached video player is actively playing. Android 12 and later use
-the system's automatic home gesture transition; Android 8.0 through 11 enter
-PiP from the activity's user-leave callback. PiP stays disabled while playback
-is paused, the view is not visible, or the device does not advertise PiP support.
-The host activity opts into PiP only when this plugin is reachable.
+---
 
-Android uses Media3 1.11.1, the Media3 Cronet data source, and app-packaged
-Cronet. HLS and DASH manifests should use supported media sample and container
-formats for the target devices. The iOS plugin uses AVPlayer and has no
-third-party playback dependency.
+### `VideoView` Native Component
 
-## Maintainer validation app
+Visual display surface hosting the native video render layer.
 
-The internal two-player app in [`tests/demo/app/App.nx`](tests/demo/app/App.nx)
-is used to validate setup, typed errors, independent controls, event
-subscriptions, disposal, and Android PiP. It is a plugin test fixture, not a
-curated Nexa app example.
+```nexa
+native component VideoView
+```
 
-App-level plugin calls, supported properties, event handlers, and component
-arguments hot reload through Nexa's generated DevRuntime adapters. Changes to
-the plugin contract, native implementation, dependencies, or host configuration
-require rebuilding the host.
+#### Properties
 
-## Current platform boundary
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `player` | `VideoPlayer` | — | Required player instance binding |
+| `controls` | `Bool` | `true` | Enables platform-native overlay playback controls |
+| `softwareDecodingEnabled` | `Bool` | `true` | Allows software fallback if hardware HEVC/H.264 decoders are saturated |
 
-The Android host enters PiP only while one visible player is actively playing.
-Apps should make the player the primary content of the screen during playback;
-the system resizes the host activity as a whole. The iOS system player exposes
-its native playback controls and PiP. Background audio session configuration
-is outside this video plugin's current contract.
+---
+
+### Data Structures & Enums
+
+#### `PlayerState`
+- `idle`: Uninitialized player.
+- `preparing`: Buffering video manifest and initial frames.
+- `ready`: Ready for smooth playback.
+- `playing`: Actively decoding and displaying video.
+- `paused`: Suspended.
+- `ended`: Completed playback.
+- `failed`: Decoding or network failure.
+
+#### `PlayerOptions`
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `autoplay` | `Bool` | `false` | Automatically begin playing upon ready state |
+| `volume` | `Float64` | `1.0` | Initial volume factor |
+
+---
+
+### Error Handling (`PlayerError`)
+
+| Variant | Description |
+|---|---|
+| `invalidUrl` | Malformed or unreachable URL |
+| `decodingFailed(message: String)` | Unsupported video format, DRM failure, or hardware codec crash |

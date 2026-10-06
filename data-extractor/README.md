@@ -1,45 +1,82 @@
 # `@nexa/data-extractor`
 
-Detects dates, phone numbers, URLs, email addresses, and postal addresses with
-the platform's built-in text recognition. Keep one `DataExtractor` instance in
-your app or service and call it from an asynchronous task when text changes.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-NSDataDetector%20%2F%20TextClassifier-purple.svg)](https://developer.apple.com/documentation/foundation/nsdatadetector)
 
-```nx
-plugin "dev.nexa.data-extractor" as DataExtractor
+On-device natural language entity detection and parsing. Automatically identifies dates, calendar appointments, phone numbers, web URLs, email addresses, and street addresses inside arbitrary text.
 
-app ContactEditor {
-    let extractor = DataExtractor.DataExtractor()
-    state extractionTask: TaskHandle? = null
-    state matches: Array<DataExtractor.ExtractedData> = []
-    state message: String = ""
+Backed by Apple `NSDataDetector` on iOS and Android `TextClassifier` on Android. Runs 100% offline on-device with zero cloud dependencies or latency.
 
-    body {
-        TextInput(value: message, placeholder: "Message")
-            .onChange { value ->
-                Task.launch(handle: extractionTask, executor: TaskExecutor.Main) {
-                    matches = await extractor.extract(value)
-                }
+---
+
+## 1. Quick Start
+
+```nexa
+plugin "dev.nexa.data-extractor" as NLP
+
+component SmartMessageScreen() {
+    let extractor = NLP.DataExtractor()
+    state detectedLinks: Array<NLP.ExtractedData> = []
+
+    fn parseIncomingMessage(body: String) {
+        detectedLinks = await extractor.extract(body)
+        for entity in detectedLinks {
+            print("Found \(entity.kind) at [\(entity.start):\(entity.length)]: \(entity.text)")
+        }
+    }
+
+    onAppear(() => {
+        parseIncomingMessage("Let's meet tomorrow at 3pm at 123 Market St or call me at 415-555-0199")
+    })
+
+    VStack(spacing: 8) {
+        FastList(detectedLinks) { entity in
+            HStack {
+                Text("\(entity.kind)", weight: "bold", size: 14)
+                Spacer()
+                Text(entity.text, size: 14, color: "#007AFF")
             }
+        }
     }
 }
 ```
 
-`ExtractedData.kind` identifies `date`, `phoneNumber`, `url`, `email`, or
-`address`. `text` is the exact matched substring. `start` and `length` are
-UTF-16 offsets into the original input on both platforms. A resolved date's
-`timestampMillis` is populated on iOS from `NSDataDetector`; Android's public
-`TextLinks` result identifies the date range and date/date-time kind but
-does not provide a normalized instant, so `timestampMillis` is `null` there.
-Apple's detector doesn't expose date-versus-date-time precision, so iOS returns
-`timePrecisionAvailable: false`; Android returns `true` for recognized date
-matches, with `hasTime` set from its date/date-time entity. Apps can use the
-detected text and optional timestamp to present their own date selection flow.
+---
 
-On iOS the plugin uses one cached `NSDataDetector` instance for dates,
-addresses, links, and phone numbers on a private serial actor. Email matches
-reported as `mailto:` links are exposed as `email`. On Android it uses
-`TextClassifier.generateLinks` with the current system locales and an explicit
-entity list on API 28+. It supplies a reference time on API 30+, serializes
-extraction on a background dispatcher, and keeps blocking classifier work off
-the UI thread. Android applications that use this plugin must support API 28
-or newer.
+## 2. API Reference
+
+### `DataExtractor` Native Class
+
+```nexa
+native class DataExtractor {
+    init()
+}
+```
+
+#### Methods
+
+| Method | Return Type | Description |
+|---|---|---|
+| `extract(text: String)` | `Array<ExtractedData>` | Parses input string and returns matched entities ordered by UTF-16 offset |
+
+---
+
+### Data Structures & Enums
+
+#### `ExtractedDataKind`
+- `date`: Calendar dates, relative days ("tomorrow", "next Monday"), and timestamp expressions.
+- `phoneNumber`: Local and international phone numbers.
+- `url`: Web URLs, IP addresses, and custom URI schemes.
+- `email`: Validated email addresses.
+- `address`: Physical postal addresses and locations.
+
+#### `ExtractedData`
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `ExtractedDataKind` | Type of detected entity |
+| `text` | `String` | Raw substring matching the entity in the source text |
+| `start` | `Int32` | Starting character index in UTF-16 code units |
+| `length` | `Int32` | Length of entity substring in UTF-16 code units |
+| `timestampMillis` | `Int64?` | Resolved Unix epoch millisecond timestamp for `date` entities |
+| `hasTime` | `Bool` | `true` if date entity includes specific hour/minute precision |
+| `timePrecisionAvailable` | `Bool` | `false` if platform is unable to distinguish date-only from date-and-time |

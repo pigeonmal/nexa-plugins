@@ -1,116 +1,156 @@
-# MMKV
+# `@nexa/mmkv`
 
-A synchronous key-value storage plugin for [Tencent MMKV](https://github.com/Tencent/MMKV).
-A read walks the memory-mapped page and a write appends to it, so there is no
-async boundary anywhere in the surface.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-Tencent%20MMKV-red.svg)](https://github.com/Tencent/MMKV)
 
-## Instance ownership
+Ultra-fast, synchronous key-value storage engine backed by Tencent MMKV. Uses memory-mapped files (`mmap`) and protobuf append-only structures for sub-millisecond reads and writes without async thread-switching overhead.
 
-Tencent's [official iOS guide](https://github.com/Tencent/MMKV/wiki/iOS_tutorial)
-initializes MMKV once during application startup on the main thread, then uses
-`defaultMMKV()` for the shared default store. It recommends creating a separate
-MMKV instance when a module needs isolated storage. Keep the MMKV handle in a
-standalone persistence layer, not in a SwiftUI view or reusable UI component.
+Supports typed primitives, custom structs (`setObject`/`getObject`), collections (`Array`, `Set`, `Map`), hardware AES encryption, multi-process synchronization, and reactive key observation.
 
-In a Nexa app, keep persistence calls in a dedicated `.nx` module and use a
-clear key namespace for independent preferences (for example,
-`settings.theme`). Use SQLite for related or queryable records such as tasks
-and comments. A file-scope immutable
-`let` is initialized once per process and emitted as a native file-level
-binding (`private let` in Swift, `private val` in Kotlin). It is independent of
-app and UI identity, so helper functions in that module reuse one `MMKVStore`
-handle across calls:
+---
+
+## 1. Quick Start
 
 ```nexa
 plugin "dev.nexa.mmkv" as MMKV
 
-struct PlayerOptions {
-    autoplay: Bool,
-    volume: Float64,
+struct UserPreferences {
+    theme: String,
+    notificationsEnabled: Bool,
+    volume: Float64
 }
 
-let playerStore = MMKV.MMKVStore("player", null, false)
+// Module-level persistent store instance
+let store = MMKV.MMKVStore("user_settings", cryptKey: null, multiProcess: false)
 
-fn savePlayerOptions(options: PlayerOptions) -> Bool {
-    return playerStore.setObject("options", options)
-}
+component SettingsScreen() {
+    state theme: String = store.getString("theme") ?? "system"
+    state volume: Float64 = store.getFloat64("volume") ?? 0.8
 
-fn loadPlayerOptions() -> PlayerOptions? {
-    return playerStore.getObject<PlayerOptions>("options")
+    fn updateTheme(newTheme: String) {
+        store.setString("theme", newTheme)
+        theme = newTheme
+    }
+
+    fn updateVolume(newVolume: Float64) {
+        store.setFloat64("volume", newVolume)
+        volume = newVolume
+    }
+
+    VStack(spacing: 16) {
+        Text("Current Theme: \(theme)", size: 16)
+        Button("Switch to Dark", action: () => { updateTheme("dark") })
+        Button("Switch to Light", action: () => { updateTheme("light") })
+    }
 }
 ```
 
-The binding must be immutable; app `state` and component-local `let` bindings
-retain their existing UI-scoped lifecycle. Keep the file-scope store and its
-read/write helpers together in the standalone persistence module. The handle
-then lives for the process lifetime, so per-call `dispose()` is unnecessary.
-Use a distinct instance ID when another module needs isolated storage.
+---
 
-## What it stores
+## 2. API Reference
 
-Scalars, strings, byte buffers, arrays, sets, and maps use their matching
-typed MMKV methods. `setObject` and `getObject<T>` are for app-defined value
-structs; do not use them for primitives, enums, or collections. For example,
-use `getFloat64` for a `Float64` and `getList<T>` for an array:
+### `MMKVStore` Native Class
 
 ```nexa
-store.setString("name", "nexa")
-store.setBuffer("avatar", Bytes.fromFile(path))
-store.setObject("playerOption", options)
-store.setList<Int32>("scores", [1, 2, 3])
-store.setSet<String>("tags", ["a", "b"])
-store.setMap<String, Int32>("highScores", scores)
+native class MMKVStore {
+    init(instanceID: String, cryptKey: String?, multiProcess: Bool)
+}
 ```
 
-A setter binds its type from the value it is given. A getter binds from the type
-it has to produce, or from an explicit type argument when there is no other
-information:
+#### Properties
 
-```nexa
-options = store.getObject("playerOption")            // app struct from the binding
-volume = store.getFloat64("volume") ?? 0            // primitive through its typed API
-tags = store.getSet<String>("tags") ?? []           // explicit, two type arguments too
-scores = store.getMap<String, Int32>("highScores")   // from the binding
-```
+| Property | Type | Access | Description |
+|---|---|---|---|
+| `instanceID` | `String` | Read-only | Unique identifier and file stem for this store instance |
+| `isEncrypted` | `Bool` | Read-only | Whether the store is encrypted with an AES crypt key |
+| `isMultiProcess` | `Bool` | Read-only | Whether cross-process file locks are active |
+| `rootDirectory` | `String` | Read-only | Resolved filesystem path where MMKV files reside |
+| `version` | `String` | Read-only | Underlying native MMKV C++ library version |
+| `pageSize` | `Int64` | Read-only | Memory mapping page size in bytes |
 
-Sets and maps are written in a canonical order, so the same value produces the
-same bytes on both platforms and a store written on one platform reads back on
-the other. The layout is fixed and the schema is not versioned: changing a
-struct's fields changes what a stored value means, so rename the key or bump a
-version field alongside the change.
+---
 
-## Encryption and sharing
+#### Scalar & Value Methods
 
-`MMKVStore(instanceID, cryptKey, multiProcess)` maps one file. Pass a
-`cryptKey` for AES encryption, and `multiProcess = true` when another process
-writes the same file. Both must match the values the store was created with.
+| Method | Return Type | Description |
+|---|---|---|
+| `setBool(key: String, value: Bool)` | `Bool` | Writes boolean value |
+| `getBool(key: String)` | `Bool?` | Reads boolean or returns `null` |
+| `setInt32(key: String, value: Int32)` | `Bool` | Writes 32-bit signed integer |
+| `getInt32(key: String)` | `Int32?` | Reads 32-bit signed integer or returns `null` |
+| `setInt64(key: String, value: Int64)` | `Bool` | Writes 64-bit signed integer |
+| `getInt64(key: String)` | `Int64?` | Reads 64-bit signed integer or returns `null` |
+| `setUInt32(key: String, value: UInt32)` | `Bool` | Writes 32-bit unsigned integer |
+| `getUInt32(key: String)` | `UInt32?` | Reads 32-bit unsigned integer or returns `null` |
+| `setUInt64(key: String, value: UInt64)` | `Bool` | Writes 64-bit unsigned integer |
+| `getUInt64(key: String)` | `UInt64?` | Reads 64-bit unsigned integer or returns `null` |
+| `setFloat32(key: String, value: Float32)` | `Bool` | Writes 32-bit float |
+| `getFloat32(key: String)` | `Float32?` | Reads 32-bit float or returns `null` |
+| `setFloat64(key: String, value: Float64)` | `Bool` | Writes 64-bit double |
+| `getFloat64(key: String)` | `Float64?` | Reads 64-bit double or returns `null` |
+| `setString(key: String, value: String)` | `Bool` | Writes UTF-8 string |
+| `getString(key: String)` | `String?` | Reads UTF-8 string or returns `null` |
+| `setBuffer(key: String, value: Bytes)` | `Bool` | Writes raw binary byte buffer |
+| `getBuffer(key: String)` | `Bytes?` | Reads raw binary byte buffer or returns `null` |
+| `setObject<T: Struct>(key: String, value: T)` | `Bool` | Serializes custom `.nx` struct using static binary codec |
+| `getObject<T: Struct>(key: String)` | `T?` | Deserializes custom `.nx` struct using static binary codec |
+| `setList<T>(key: String, values: Array<T>)` | `Bool` | Writes array of typed elements |
+| `getList<T>(key: String)` | `Array<T>?` | Reads array of typed elements or returns `null` |
+| `setSet<T>(key: String, values: Set<T>)` | `Bool` | Writes set of typed elements |
+| `getSet<T>(key: String)` | `Set<T>?` | Reads set of typed elements or returns `null` |
+| `setMap<K, V>(key: String, values: Map<K, V>)` | `Bool` | Writes map with sorted keys for reproducible bytes |
+| `getMap<K, V>(key: String)` | `Map<K, V>?` | Reads map or returns `null` |
 
-Unencrypted stores enable MMKV's compare-before-set optimization by default.
-Repeated writes of the same value skip redundant appends. This optimization is
-incompatible with encryption and key expiration. When most writes change the
-value, call `disableCompareBeforeSet()` to avoid comparing it; call
-`enableCompareBeforeSet()` to turn the optimization back on. Both methods
-return `false` when MMKV cannot apply the requested setting. Rekeying to an
-encrypted store always disables comparison; rekeying back to an unencrypted
-store restores the last requested comparison setting.
+---
 
-`rekey` re-encrypts an existing store with a new key, or removes encryption
-when the key is `null`. MMKV uses up to 16 bytes of the key for AES-128 and up
-to 32 for AES-256, and does not validate the length.
+#### Key Management & Maintenance
 
-## Change listeners
+| Method | Return Type | Description |
+|---|---|---|
+| `contains(key: String)` | `Bool` | Checks whether key exists in store |
+| `getAllKeys()` | `Array<String>` | Returns all keys in store sorted lexicographically |
+| `getAllKeysWithPrefix(prefix: String)` | `Array<String>` | Returns all keys starting with prefix |
+| `getAllKeysWithSuffix(suffix: String)` | `Array<String>` | Returns all keys ending with suffix |
+| `getAllKeysMatching(prefix: String, suffix: String)` | `Array<String>` | Returns keys matching both prefix and suffix |
+| `remove(key: String)` | `Bool` | Removes specific key from store |
+| `removeMany(keys: Array<String>)` | `Int32` | Removes multiple keys and returns count of removed items |
+| `clearAll()` | `Bool` | Removes all keys, retaining mapped file capacity |
+| `clearAllKeepingSpace()` | `Bool` | Removes all keys and truncates mapped file |
+| `trim()` | `Int64` | Compacts storage file and returns reclaimed bytes |
+| `count()` | `Int64` | Total number of keys in store |
+| `totalSize()` | `Int64` | Total file size in bytes |
+| `actualSize()` | `Int64` | Byte count of active payload data |
+| `valueSize(key: String)` | `Int64` | Size of specific key's value including protobuf header |
+| `stats()` | `MMKVStats` | Snapshot of store key count, sizes, and page size |
+| `sync()` | `Void` | Synchronously flushes memory-mapped pages to disk |
+| `asyncFlush()` | `Void` | Asynchronously queues disk flush on MMKV background worker |
+| `rekey(cryptKey: String?)` | `Bool` | Changes encryption key or decrypts store if `null` |
+| `checkContentChanged()` | `Void` | Manually synchronizes memory map with external process writes |
+| `backup(directory: String)` | `Bool` | Backs up store files to target directory path |
+| `restore(directory: String)` | `Bool` | Restores store files from target directory path |
+| `removeStorage()` | `Bool` | Permanently deletes underlying files from disk |
+| `dispose()` | `Void` | Unmaps memory pages and releases native store handle |
 
-`observe(key)` registers a key; `valueChanged` fires for writes to observed
-keys, including writes another process made. `contentChanged` fires when another
-process wrote to the store at all. MMKV reports the store, never the key, so
-every observed key of that store is reported.
+---
 
-## Platform notes
+#### Change Observers & Events
 
-- iOS uses the official Tencent MMKV Swift package from version 2.4.2.
-- The Android artifact is `io.github.zhongwuzw:mmkv`, which still ships
-  32-bit ABIs; upstream `com.tencent:mmkv` dropped them in 2.0.0.
-- A file that fails its CRC or length check is recovered, not discarded, so a
-  corrupt file keeps whatever is still readable.
-- MMKV's cross-process file lock is POSIX-only and is therefore not part of the
-  surface.
+| Method / Event | Description |
+|---|---|
+| `observe(key: String)` | Registers key for mutation notifications across processes |
+| `unobserve(key: String)` | Stops observing key mutations |
+| `unobserveAll()` | Clears all registered key observers |
+| `event valueChanged(key: String)` | Fired when any observed key is modified |
+| `event contentChanged()` | Fired when an external process writes to the store |
+
+---
+
+### Data Structures
+
+#### `MMKVStats`
+| Field | Type | Description |
+|---|---|---|
+| `keyCount` | `Int64` | Active key count |
+| `totalSize` | `Int64` | Allocated file size in bytes |
+| `actualSize` | `Int64` | Actual data payload size in bytes |
+| `pageSize` | `Int64` | Memory page size in bytes |

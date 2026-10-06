@@ -1,54 +1,107 @@
 # `@nexa/mail-composer`
 
-Presents a message in the native email composition flow.
+[![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
+[![Native Engine](https://img.shields.io/badge/Engine-MessageUI%20%2F%20Intent%20Chooser-blue.svg)](https://developer.apple.com/documentation/messageui)
 
-```nx
+Native email composition sheet for iOS and Android.
+
+Backed by Apple `MessageUI` (`MFMailComposeViewController`) on iOS and standard Android `ACTION_SENDTO` mail client intent chooser on Android.
+
+---
+
+## 1. Quick Start
+
+```nexa
 plugin "dev.nexa.mail-composer" as Mail
 
-app MailComposerExample {
-    let mail = Mail.MailComposer()
-    state mailTask: TaskHandle? = null
-    state outcome = ""
+component FeedbackScreen() {
+    let composer = Mail.MailComposer()
+    state statusMessage: String? = null
 
-    body {
-        OnAppear {
-            mail.completed { result ->
-                outcome = "\(result)"
+    onAppear(() => {
+        composer.onCompleted((result) => {
+            switch result {
+                case Mail.MailComposerResult.sent:
+                    statusMessage = "Thank you! Your feedback has been sent."
+                case Mail.MailComposerResult.saved:
+                    statusMessage = "Draft saved in your mail app."
+                case Mail.MailComposerResult.cancelled:
+                    statusMessage = "Feedback cancelled."
+                case Mail.MailComposerResult.failed:
+                    statusMessage = "Failed to send email."
             }
+        })
+    })
+
+    fn sendFeedback() {
+        if !composer.available {
+            statusMessage = "No email account configured on this device."
+            return
         }
 
-        Column(spacing: 12) {
-            Button("Send feedback") {
-                Task.launch(handle: mailTask, executor: TaskExecutor.Main) {
-                    try {
-                        await mail.present(
-                            ["support@example.com"],
-                            "App feedback",
-                            "Tell us what you think.",
-                        )
-                    } catch {
-                        case Mail.MailComposerError.unavailable {}
-                        case Mail.MailComposerError.presentationUnavailable {}
-                    }
-                }
-            }
-            Text(outcome)
+        try {
+            await composer.present(
+                to: ["support@example.com"],
+                subject: "App Feedback",
+                body: "\n\n---\nDevice Info: \(composer.deviceInfo)"
+            )
+        } catch Mail.MailComposerError as err {
+            statusMessage = "Failed to present mail composer: \(err)"
+        }
+    }
+
+    VStack(spacing: 16) {
+        Button("Send Feedback", action: () => { sendFeedback() })
+        if let msg = statusMessage {
+            Text(msg, size: 14)
         }
     }
 }
 ```
 
-On iOS, the plugin presents `MFMailComposeViewController` with the supplied
-recipients, subject, and plain-text body. On Android, it launches a chooser for
-apps that handle `mailto:`. The method reports `unavailable` if the platform
-has no configured mail composer and `presentationUnavailable` if no foreground
-host is available. Read `mail.available` before displaying the action; on
-Android it reports whether a foreground host exists because Android 11+ package
-visibility can hide email clients from a preflight query. The `present` call
-still reports `unavailable` if no handler exists. On iOS, handle
-`mail.completed` to receive the native
-composer result (`sent`, `saved`, `cancelled`, or `failed`) after dismissal.
-Android's chooser delegates composition and delivery to the selected email
-app, so it cannot report whether the user sent or canceled the message.
-`mail.deviceInfo` returns the current device model and operating-system version
-for including useful diagnostics in a user-submitted feedback message.
+---
+
+## 2. API Reference
+
+### `MailComposer` Native Class
+
+```nexa
+native class MailComposer {
+    init()
+}
+```
+
+#### Properties
+
+| Property | Type | Access | Description |
+|---|---|---|---|
+| `available` | `Bool` | Read-only | Whether a configured email account is ready to send mail |
+| `deviceInfo` | `String` | Read-only | Formatted string containing device model and OS version (ideal for diagnostic bug reports) |
+
+#### Methods
+
+| Method | Return Type | Description |
+|---|---|---|
+| `present(to, subject, body)` | `Void` | Presents the platform's native mail drafting interface |
+
+#### Events
+
+| Event | Payload | Description |
+|---|---|---|
+| `completed` | `result: MailComposerResult` | Reports outcome after iOS composer dismissal. (Note: Android external app chooser does not report delivery outcome) |
+
+---
+
+### Enums & Errors
+
+#### `MailComposerResult`
+- `sent`: Mail was successfully queued or sent by the system client.
+- `saved`: User saved the email in their local drafts folder.
+- `cancelled`: User discarded the message.
+- `failed`: Mail delivery or composer system error.
+
+#### `MailComposerError`
+| Variant | Description |
+|---|---|
+| `unavailable` | Device has no email client or active email accounts configured |
+| `presentationUnavailable` | Current UI viewController / Activity cannot present modal sheets |

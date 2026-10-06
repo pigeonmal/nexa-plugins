@@ -1,44 +1,41 @@
-// SQLite's dynamic rows cross the plugin boundary as typed arrays. Every cell
-// carries one explicit kind and exactly one matching payload field.
-enum SQLiteValueKind {
+// Values bind directly from Nexa literals and variables. The compiler lowers
+// each value to the matching payload case; app code never constructs this.
+enum Value {
     nullValue
-    integer
-    real
-    text
-    blob
+    boolean(value: Bool)
+    int32(value: Int32)
+    int64(value: Int64)
+    float64(value: Float64)
+    text(value: String)
+    blob(value: Bytes)
 }
 
-struct SQLiteValue {
-    kind: SQLiteValueKind
-    integerValue: Int64?
-    realValue: Float64?
-    textValue: String?
-    blobValue: Bytes?
-}
-
-struct SQLiteStatement {
+struct Statement {
     sql: String
-    parameters: Array<SQLiteValue>
+    parameters: Array<Value>
 }
 
-struct SQLiteExecutionResult {
+struct ExecutionResult {
+    /// Rows changed by an INSERT, UPDATE, or DELETE; schema statements return 0.
     rowsAffected: Int64
+    /// Inserted row ID, or 0 when the statement did not insert a row.
     lastInsertRowId: Int64
 }
 
-struct SQLiteQueryResult {
+struct QueryResult {
     columnNames: Array<String>
-    rows: Array<Array<SQLiteValue>>
+    rows: Array<Array<Value>>
 }
 
 /// A migration version must start at 1 and increase by one for each entry.
-struct SQLiteMigration {
+struct Migration {
     version: Int32
-    statements: Array<SQLiteStatement>
+    statements: Array<String>
 }
 
-error SQLiteError {
+error Failure {
     invalidDatabaseName(message: String)
+    appGroupUnavailable
     openFailed(message: String)
     invalidValue(message: String)
     prepareFailed(message: String)
@@ -50,16 +47,62 @@ error SQLiteError {
     closed
 }
 
-/// App-private SQLite database. SQL runs asynchronously away from the UI
-/// executor. Migrations and statement batches are applied atomically.
-native class SQLiteDatabase {
-    init(name: String)
+/// A per-consumer, lifecycle-owned signal that a committed write may have
+/// changed a query result. Its table filter determines which writes notify it;
+/// re-run the typed query in the handler, then dispose it when its screen leaves.
+native class InvalidationSubscription {
+    init()
 
-    async fn execute(sql: String, parameters: Array<SQLiteValue>) -> SQLiteExecutionResult throws SQLiteError
-    async fn query(sql: String, parameters: Array<SQLiteValue>) -> SQLiteQueryResult throws SQLiteError
-    async fn executeTransaction(statements: Array<SQLiteStatement>) -> Array<SQLiteExecutionResult> throws SQLiteError
-    async fn migrate(migrations: Array<SQLiteMigration>) -> Int32 throws SQLiteError
-    async fn userVersion() -> Int32 throws SQLiteError
+    event invalidated()
+
+    fn dispose()
+}
+
+/// A long-lived SQLite connection. The sharedWithWidgets option opens the
+/// same database for the app and its widgets: App Group on iOS, app database
+/// directory on Android. SQL runs asynchronously away from the UI executor.
+native class Database {
+    init(name: String, sharedWithWidgets: Bool)
+
+    /// Dynamic SQL escape hatch. Prefer `execute` for statically known SQL so
+    /// the Nexa compiler can validate it and infer the affected tables.
+    async fn executeRaw(sql: String, parameters: Array<Value>) -> ExecutionResult throws Failure
+    async fn execute(sql: String, parameters: Array<Value>) -> ExecutionResult throws Failure
+    /// Executes one compiler-validated write. The supplied table names are
+    /// the complete set of tables whose rows may change; only subscriptions
+    /// that read one of those tables are notified. Keep `execute` for dynamic
+    /// SQL, which conservatively invalidates every observer.
+    async fn executeTracked(sql: String, parameters: Array<Value>, changedTables: Array<String>) -> ExecutionResult throws Failure
+    /// Maps selected rows directly into app structs. Nexa supplies a static
+    /// decoder that resolves column names once and runs on the database worker.
+    async fn query<T: Row>(sql: String, parameters: Array<Value>) -> Array<T> throws Failure rowFailure queryFailed
+    /// Returns a live reactive signal that automatically updates whenever writes touch the tables read by this query.
+    fn observeQuery<T: Row>(sql: String, parameters: Array<Value>) -> Signal<Array<T>> rowFailure queryFailed
+    /// Dynamic escape hatch for callers that need runtime row inspection.
+    async fn queryRaw(sql: String, parameters: Array<Value>) -> QueryResult throws Failure
+    /// Executes one INSERT, UPDATE, or DELETE for each parameter row. The SQL
+    /// is prepared once and reused inside one atomic transaction. rowsAffected
+    /// is the sum across the batch; lastInsertRowId is the final inserted row
+    /// ID, or 0 when the batch did not insert a row.
+    async fn executeBatch(sql: String, rows: Array<Array<Value>>) -> ExecutionResult throws Failure
+    async fn executeTransaction(statements: Array<Statement>) -> Array<ExecutionResult> throws Failure
+    async fn migrate(migrations: Array<Migration>) -> Int32 throws Failure
+    async fn userVersion() -> Int32 throws Failure
+
+    /// Creates an independent subscription for a screen or other consumer.
+    /// Notifications are coalesced and delivered on the UI executor after a
+    /// committed write; every table is conservatively treated as changed.
+    fn observe() -> InvalidationSubscription
+    /// Creates an independent subscription that is notified only when a
+    /// committed write changes at least one listed table. Table names are
+    /// matched case-insensitively, like SQLite identifiers.
+    fn observeTables(tables: Array<String>) -> InvalidationSubscription
+    /// Attaches a reusable subscription handle. Call from OnAppear, then
+    /// dispose it from OnDisappear; a later OnAppear may attach it again.
+    fn attach(subscription: InvalidationSubscription)
+    /// Attaches a reusable subscription to the listed tables. This replaces
+    /// any filter previously assigned to the subscription.
+    fn attachTables(subscription: InvalidationSubscription, tables: Array<String>)
 
     fn dispose()
 }

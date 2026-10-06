@@ -14,6 +14,12 @@ struct RemoteNotification {
     data: Map<String, String>
 }
 
+struct LocalNotification {
+    identifier: String
+    title: String
+    body: String
+}
+
 /// Schedules notifications owned by this app. Request the core Notifications
 /// permission before scheduling on platforms that require runtime consent.
 native class Notifications {
@@ -26,9 +32,21 @@ native class Notifications {
         delaySeconds: Int64
     ) throws NotificationError
 
+    /// Schedules a notification for a Unix timestamp in seconds.
+    async fn scheduleLocalAt(
+        identifier: String,
+        title: String,
+        body: String,
+        timestampSeconds: Int64
+    ) throws NotificationError
+
     async fn isLocalPending(identifier: String) -> Bool throws NotificationError
     fn cancelLocal(identifier: String)
     fn cancelAllLocal()
+
+    /// Updates the app's native badge count. Android applies the number to
+    /// active app notifications; display remains launcher-controlled.
+    async fn setBadgeCount(count: Int32)
 
     /// Registers this app with APNs or Firebase Cloud Messaging and returns
     /// the platform registration token for the app's current installation.
@@ -37,6 +55,8 @@ native class Notifications {
     event remoteNotificationReceived(notification: RemoteNotification)
     event remoteNotificationOpened(notification: RemoteNotification)
     event remoteTokenChanged(token: String)
+    /// Fires when the user opens a notification scheduled through this plugin.
+    event localNotificationOpened(notification: LocalNotification)
 }
 
 config {

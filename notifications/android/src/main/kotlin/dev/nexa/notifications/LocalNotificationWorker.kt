@@ -1,6 +1,9 @@
 package dev.nexa.notifications
 
 import android.content.Context
+import android.app.PendingIntent
+import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.Worker
@@ -19,7 +22,30 @@ public class LocalNotificationWorker(
         return try {
             ensureNotificationsEnabled(applicationContext)
             ensureNotificationChannel(applicationContext)
-            val notification = NotificationCompat.Builder(applicationContext, NOTIFICATION_CHANNEL_ID)
+            val launchIntent = applicationContext.packageManager
+                .getLaunchIntentForPackage(applicationContext.packageName)
+                ?.apply {
+                    action = ACTION_LOCAL_NOTIFICATION_OPENED
+                    data = Uri.Builder()
+                        .scheme("nexa-notification")
+                        .authority("local")
+                        .appendPath(identifier)
+                        .build()
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra(KEY_LOCAL_OPENED, true)
+                    putExtra(KEY_IDENTIFIER, identifier)
+                    putExtra(KEY_TITLE, title)
+                    putExtra(KEY_BODY, body)
+                }
+            val contentIntent = launchIntent?.let {
+                PendingIntent.getActivity(
+                    applicationContext,
+                    notificationId(identifier),
+                    it,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            }
+            val builder = NotificationCompat.Builder(applicationContext, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(title)
                 .setContentText(body)
@@ -27,7 +53,12 @@ public class LocalNotificationWorker(
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setAutoCancel(true)
-                .build()
+            val badgeCount = applicationContext
+                .getSharedPreferences(BADGE_PREFERENCES, Context.MODE_PRIVATE)
+                .getInt(BADGE_COUNT_KEY, 0)
+            if (badgeCount > 0) builder.setNumber(badgeCount)
+            if (contentIntent != null) builder.setContentIntent(contentIntent)
+            val notification = builder.build()
             val id = notificationId(identifier)
             notificationPreferences(applicationContext).edit().putInt(identifier, id).apply()
             NotificationManagerCompat.from(applicationContext).notify(id, notification)

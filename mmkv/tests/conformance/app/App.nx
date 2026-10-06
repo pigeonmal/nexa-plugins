@@ -14,6 +14,10 @@ struct PlayerOptions {
     tags: Array<String>,
 }
 
+struct RatioValue {
+    value: Float64,
+}
+
 struct Chapter {
     title: String,
     seconds: Int64,
@@ -65,7 +69,7 @@ app MmkvConformance {
     state listWriteNs: Int64 = 0
 
     state launches: Int32 = 0
-    state ratio: Float64 = 0
+    state ratio: RatioValue? = null
     state enabled: Bool = false
     state name: String = ""
     state raw: Bytes? = null
@@ -197,14 +201,14 @@ app MmkvConformance {
                 Column(spacing: 12) {
                     Button("Generic ees") {
                         store.setObject("options", PlayerOptions(true, 0.5, PlaybackState.playing, ["a"]))
-                        store.setObject("ratio", 0.75)
+                        store.setObject("ratio", RatioValue(0.75))
                         store.setList<Int32>("launches-list", [1, 2, 3])
                         store.setSet<String>("tags", ["a", "b"])
                         store.setMap<String, Int32>("highScores", highScores)
                         store.setList<Chapter>("chapters", [Chapter("intro", 90)])
 
                         options = store.getObject("options")
-                        ratio = store.getObject<Float64>("ratio") ?? 0
+                        ratio = store.getObject("ratio")
                         tags = store.getSet<String>("tags") ?? []
                         highScores = store.getMap<String, Int32>("highScores") ?? ["none": 0]
                         chapters = store.getList<Chapter>("chapters") ?? []

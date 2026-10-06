@@ -1,0 +1,14 @@
+[package]
+name = "nexa-sqlite-compiler-analyzer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nexa-diagnostics = { path = "../../../crates/nexa-diagnostics" }
+nexa-plugin-compiler-api = { path = "../../../crates/nexa-plugin-compiler-api" }
+nexa-syntax = { path = "../../../crates/nexa-syntax" }
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "column_metadata", "hooks"] }
+serde_json = "1.0"
+
+[workspace]

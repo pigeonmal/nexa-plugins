@@ -19,6 +19,7 @@ private final class NotificationsRemoteHub {
     private var pendingReceived: [RemoteNotification] = []
     private var pendingOpened: [RemoteNotification] = []
     private var pendingTokens: [String] = []
+    private var pendingLocalOpens: [LocalNotification] = []
     private var tokenWaiters: [CheckedContinuation<String, NotificationError>] = []
     private var currentToken: String?
 
@@ -69,6 +70,18 @@ private final class NotificationsRemoteHub {
 
     func open(_ notification: RemoteNotification) {
         dispatch(notification, opened: true)
+    }
+
+    func openLocal(_ notification: LocalNotification) {
+        let interested = liveObservers().filter { $0.onLocalNotificationOpened != nil }
+        guard !interested.isEmpty else {
+            if pendingLocalOpens.count == 20 { pendingLocalOpens.removeFirst() }
+            pendingLocalOpens.append(notification)
+            return
+        }
+        for owner in interested {
+            owner.onLocalNotificationOpened?(notification)
+        }
     }
 
     func tokenChanged(_ token: String) {
@@ -142,6 +155,15 @@ private final class NotificationsRemoteHub {
         }
     }
 
+    func deliverPendingLocalOpens(to owner: NotificationsImpl) {
+        guard owner.onLocalNotificationOpened != nil else { return }
+        let pending = pendingLocalOpens
+        pendingLocalOpens.removeAll(keepingCapacity: true)
+        for notification in pending {
+            owner.onLocalNotificationOpened?(notification)
+        }
+    }
+
     private func liveObservers() -> [NotificationsImpl] {
         pruneObservers()
         return observers.compactMap(\.value)
@@ -176,6 +198,12 @@ public final class NotificationsImpl: NotificationsSpec {
         }
     }
 
+    public var onLocalNotificationOpened: ((LocalNotification) -> Void)? {
+        didSet {
+            NotificationsRemoteHub.shared.deliverPendingLocalOpens(to: self)
+        }
+    }
+
     public init() {
         NotificationsRemoteHub.shared.add(self)
     }
@@ -189,6 +217,43 @@ public final class NotificationsImpl: NotificationsSpec {
         guard !identifier.isEmpty else { throw .invalidIdentifier }
         guard delaySeconds >= 0 else { throw .invalidDelay }
 
+        let trigger: UNNotificationTrigger? = delaySeconds == 0
+            ? nil
+            : UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(delaySeconds), repeats: false)
+        try await enqueueLocal(identifier, title, body, trigger)
+    }
+
+    public func scheduleLocalAt(
+        _ identifier: String,
+        _ title: String,
+        _ body: String,
+        _ timestampSeconds: Int64
+    ) async throws(NotificationError) {
+        guard !identifier.isEmpty else { throw .invalidIdentifier }
+        guard timestampSeconds > 0 && timestampSeconds <= Int64.max / 1_000 else {
+            throw .invalidDelay
+        }
+        let fireDate = Date(timeIntervalSince1970: TimeInterval(timestampSeconds))
+        guard fireDate > Date() else { throw .invalidDelay }
+        var components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second],
+            from: fireDate
+        )
+        components.calendar = Calendar.current
+        try await enqueueLocal(
+            identifier,
+            title,
+            body,
+            UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        )
+    }
+
+    private func enqueueLocal(
+        _ identifier: String,
+        _ title: String,
+        _ body: String,
+        _ trigger: UNNotificationTrigger?
+    ) async throws(NotificationError) {
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
         case .authorized, .provisional, .ephemeral:
@@ -203,10 +268,8 @@ public final class NotificationsImpl: NotificationsSpec {
         content.title = title
         content.body = body
         content.sound = .default
+        content.userInfo["nexa.local.identifier"] = identifier
 
-        let trigger: UNNotificationTrigger? = delaySeconds == 0
-            ? nil
-            : UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(delaySeconds), repeats: false)
         let request = UNNotificationRequest(
             identifier: requestPrefix + identifier,
             content: content,
@@ -243,6 +306,15 @@ public final class NotificationsImpl: NotificationsSpec {
         center.removePendingNotificationRequests(withIdentifiers: requestIdentifiers)
         center.removeDeliveredNotifications(withIdentifiers: requestIdentifiers)
         UserDefaults.standard.removeObject(forKey: identifiersKey)
+    }
+
+    public func setBadgeCount(_ count: Int32) async {
+        let value = max(0, Int(count))
+        if #available(iOS 16.0, *) {
+            try? await center.setBadgeCount(value)
+        } else {
+            UIApplication.shared.applicationIconBadgeNumber = value
+        }
     }
 
     public func registerRemote() async throws(NotificationError) -> String {
@@ -317,6 +389,15 @@ public final class NotificationsAppDelegate: NSObject, UIApplicationDelegate, @p
     ) {
         if Self.isRemote(response.notification) {
             NotificationsRemoteHub.shared.open(Self.notification(from: response.notification))
+        } else {
+            let content = response.notification.request.content
+            guard let identifier = content.userInfo["nexa.local.identifier"] as? String else {
+                completionHandler()
+                return
+            }
+            NotificationsRemoteHub.shared.openLocal(
+                LocalNotification(identifier: identifier, title: content.title, body: content.body)
+            )
         }
         completionHandler()
     }

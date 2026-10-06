@@ -16,6 +16,12 @@ if await Permissions.request(permission: Notifications) == PermissionStatus.gran
             "Open the app when you have a moment.",
             60,
         )
+        await notifications.scheduleLocalAt(
+            "meeting-reminder",
+            "Meeting",
+            "Your meeting starts now.",
+            1_800_000_000,
+        )
     } catch {
         case Notifications.NotificationError.permissionDenied {
             // The user or system has blocked notifications.
@@ -24,7 +30,7 @@ if await Permissions.request(permission: Notifications) == PermissionStatus.gran
             // Use a non-empty identifier.
         }
         case Notifications.NotificationError.invalidDelay {
-            // Delay must be zero or positive.
+            // Delay must be non-negative; an absolute timestamp must be valid and in the future.
         }
         case Notifications.NotificationError.schedulerUnavailable {
             // The platform notification scheduler could not accept the request.
@@ -39,14 +45,31 @@ if await Permissions.request(permission: Notifications) == PermissionStatus.gran
 }
 ```
 
-The plugin exposes `scheduleLocal`, `isLocalPending`, `cancelLocal`,
-`cancelAllLocal`, and `registerRemote`. `isLocalPending(identifier)` reads the native scheduler queue
+The plugin exposes `scheduleLocal` (a relative delay) and `scheduleLocalAt` (an
+absolute Unix timestamp in seconds), `isLocalPending`, `cancelLocal`,
+`cancelAllLocal`, `setBadgeCount`, and `registerRemote`. `isLocalPending(identifier)` reads the native scheduler queue
 and returns whether that identifier is still pending; delivered notifications
 are not counted. A matching identifier replaces its pending notification. Android uses WorkManager
 so scheduled work survives process death and reboot; Android may deliver after
 the requested delay because the OS controls background scheduling. iOS uses a
 native `UNTimeIntervalNotificationTrigger`. A delay of zero requests immediate
 delivery on iOS and the earliest WorkManager execution on Android.
+Absolute timestamps must be in the future. Android converts them to a relative
+WorkManager delay, so the operating system may deliver after the requested
+time; iOS uses a native calendar trigger.
+
+`setBadgeCount(count)` uses the native app-icon badge setter on iOS 16 and later,
+with the legacy UIKit setter on earlier supported iOS versions. Android stores
+the requested count and applies it to active and subsequently delivered app
+notifications using Android's notification number. The launcher controls
+whether it displays a dot or a number, and Android cannot show an app-icon badge
+without an active notification.
+
+Subscribe to `localNotificationOpened` to receive the identifier, title, and
+body when the user opens a notification created by this plugin. This callback
+is queued until the Nexa plugin instance installs its event handler, including
+when the operating system cold-starts the app. Other notifications owned by
+the host app are not reported through this event.
 
 Call `Permissions.request(permission: Notifications)` from a user action before
 scheduling visible notifications on Android 13 and later or on iOS. The plugin

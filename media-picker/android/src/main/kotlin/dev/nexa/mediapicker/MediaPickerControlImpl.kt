@@ -22,7 +22,7 @@ import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 
-/** Opens Android's system photo picker and copies the selected item to app cache. */
+/** Opens Android's system photo picker and copies the selected item to private app storage. */
 @Composable
 public fun MediaPickerControlImpl(
     isVideo: Boolean,
@@ -71,15 +71,10 @@ public fun MediaPickerControlImpl(
 }
 
 private fun copyPickedMedia(context: Context, source: Uri): String {
-    val directory = File(context.cacheDir, "nexa-media-picker")
+    val directory = File(context.filesDir, "nexa-media-picker")
     if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory) {
         throw IOException("Could not create the media cache directory.")
     }
-    val cutoff = System.currentTimeMillis() - MEDIA_CACHE_MAX_AGE_MS
-    directory.listFiles()?.forEach { file ->
-        if (file.lastModified() < cutoff) file.delete()
-    }
-
     val mimeType = context.contentResolver.getType(source)
     val extension = mimeType?.let(MimeTypeMap.getSingleton()::getExtensionFromMimeType)
         ?.takeIf(String::isNotBlank)
@@ -108,4 +103,3 @@ private object MediaPickerWorker {
 }
 
 private const val COPY_BUFFER_SIZE_BYTES = 64 * 1024
-private const val MEDIA_CACHE_MAX_AGE_MS = 7L * 24L * 60L * 60L * 1000L

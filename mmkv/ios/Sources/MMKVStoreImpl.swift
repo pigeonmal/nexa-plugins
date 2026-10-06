@@ -11,6 +11,10 @@ import MMKV
 /// to one would only hide a caller that blocks.
 @MainActor
 public final class MMKVStoreImpl: MMKVStoreSpec {
+    private static var initializationAttempted = false
+    private static var initializationSucceeded = false
+    private static var sharedGroupDirectory: String?
+
     public let instanceID: String
     public var isMultiProcess: Bool { mode == .multiProcess }
     public var isEncrypted: Bool { cryptKey != nil }
@@ -32,21 +36,50 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
         self.instanceID = instanceID
         self.cryptKey = cryptKey.map { Data($0.utf8) }
         self.mode = multiProcess ? .multiProcess : .singleProcess
-        // MMKV must be initialized once per process; this call is idempotent
-        // and installs the handler that reports writes from other processes.
-        MMKV.initialize(rootDir: nil, logLevel: .none, handler: MMKVStoreObserver.shared)
-        self.store = MMKV(
-            mmapID: instanceID,
-            cryptKey: self.cryptKey,
-            aes256: false,
-            mode: self.mode
-        )
+        Self.initializeIfNeeded()
+        // MMKV requires an App Group directory before opening a multi-process
+        // store on Apple platforms. Leave the handle unavailable if the host
+        // app's entitlement or shared container is missing; do not let the SDK
+        // hit its assertion path during app startup.
+        if Self.initializationSucceeded && (!multiProcess || Self.sharedGroupDirectory != nil) {
+            self.store = MMKV(
+                mmapID: instanceID,
+                cryptKey: self.cryptKey,
+                aes256: false,
+                mode: self.mode
+            )
+        } else {
+            self.store = nil
+        }
         if self.cryptKey == nil {
             self.store?.enableCompareBeforeSet()
         }
         if multiProcess {
             MMKVStoreObserver.shared.register(self)
         }
+    }
+
+    private static func initializeIfNeeded() {
+        guard !initializationAttempted else { return }
+        initializationAttempted = true
+
+        if let groupID = Bundle.main.infoDictionary?["NexaAppGroupIdentifier"] as? String {
+            guard let groupURL = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: groupID
+            ) else {
+                return
+            }
+            sharedGroupDirectory = groupURL.path
+            MMKV.initialize(
+                rootDir: nil,
+                groupDir: groupURL.path,
+                logLevel: .none,
+                handler: MMKVStoreObserver.shared
+            )
+        } else {
+            MMKV.initialize(rootDir: nil, logLevel: .none, handler: MMKVStoreObserver.shared)
+        }
+        initializationSucceeded = true
     }
 
     // MARK: - Scalars

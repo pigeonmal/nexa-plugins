@@ -21,7 +21,9 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.nexa.core.NexaRuntimeCore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
 import java.util.concurrent.Executor
 import java.util.concurrent.CopyOnWriteArrayList
@@ -64,6 +66,35 @@ public class NotificationsImpl : NotificationsSpec {
     ) {
         if (identifier.isEmpty()) throw NotificationError.invalidIdentifier
         if (delaySeconds < 0) throw NotificationError.invalidDelay
+        enqueueLocal(identifier, title, body, delaySeconds)
+    }
+
+    override var onLocalNotificationOpened: ((LocalNotification) -> Unit)? = null
+        set(value) {
+            field = value
+            if (value != null) NotificationsRemoteHub.deliverPending(this)
+        }
+
+    override suspend fun scheduleLocalAt(
+        identifier: String,
+        title: String,
+        body: String,
+        timestampSeconds: Long,
+    ) {
+        if (identifier.isEmpty()) throw NotificationError.invalidIdentifier
+        val nowSeconds = System.currentTimeMillis() / 1000L
+        if (timestampSeconds <= nowSeconds || timestampSeconds > Long.MAX_VALUE / 1_000L) {
+            throw NotificationError.invalidDelay
+        }
+        enqueueLocal(identifier, title, body, timestampSeconds - nowSeconds)
+    }
+
+    private fun enqueueLocal(
+        identifier: String,
+        title: String,
+        body: String,
+        delaySeconds: Long,
+    ) {
         ensureNotificationsEnabled(context)
         ensureNotificationChannel(context)
 
@@ -136,6 +167,47 @@ public class NotificationsImpl : NotificationsSpec {
             .filterIsInstance<Int>()
             .forEach { NotificationManagerCompat.from(context).cancel(it) }
         preferences.edit().clear().apply()
+    }
+
+    override suspend fun setBadgeCount(count: Int) {
+        withContext(Dispatchers.IO) {
+            val badgeCount = count.coerceAtLeast(0)
+            context.getSharedPreferences(BADGE_PREFERENCES, Context.MODE_PRIVATE)
+                .edit()
+                .putInt(BADGE_COUNT_KEY, badgeCount)
+                .apply()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    val manager = context.getSystemService(NotificationManager::class.java)
+                    for (active in manager.activeNotifications) {
+                        val notification = active.notification
+                        val extras = notification.extras
+                        val title = extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)
+                            ?: context.applicationInfo.loadLabel(context.packageManager)
+                        val body = extras?.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString().orEmpty()
+                        val channelId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            notification.channelId
+                        } else {
+                            NOTIFICATION_CHANNEL_ID
+                        }
+                        val updated = NotificationCompat.Builder(context, channelId ?: NOTIFICATION_CHANNEL_ID)
+                            .setSmallIcon(android.R.drawable.ic_dialog_info)
+                            .setContentTitle(title)
+                            .setContentText(body)
+                            .setContentIntent(notification.contentIntent)
+                            .setNumber(badgeCount)
+                            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                            .setOnlyAlertOnce(true)
+                            .setAutoCancel(true)
+                            .build()
+                        NotificationManagerCompat.from(context).notify(active.id, updated)
+                    }
+                } catch (_: SecurityException) {
+                    // Permission may be revoked after the app requested a badge update.
+                }
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -221,6 +293,7 @@ public object NotificationsRemoteHub {
     private val pendingReceived = ArrayDeque<RemoteNotification>()
     private val pendingOpened = ArrayDeque<RemoteNotification>()
     private val pendingTokens = ArrayDeque<String>()
+    private val pendingLocalOpens = ArrayDeque<LocalNotification>()
 
     fun add(owner: NotificationsImpl) {
         mainHandler.post {
@@ -277,6 +350,27 @@ public object NotificationsRemoteHub {
         opened(RemoteNotification(identifier, title, body, data))
     }
 
+    fun dispatchLocalOpened(intent: android.content.Intent?) {
+        if (intent?.action != ACTION_LOCAL_NOTIFICATION_OPENED ||
+            !intent.getBooleanExtra(KEY_LOCAL_OPENED, false)
+        ) return
+        val identifier = intent.getStringExtra(KEY_IDENTIFIER) ?: return
+        val notification = LocalNotification(
+            identifier = identifier,
+            title = intent.getStringExtra(KEY_TITLE).orEmpty(),
+            body = intent.getStringExtra(KEY_BODY).orEmpty(),
+        )
+        mainHandler.post {
+            val interested = observers.mapNotNull { it.get() }
+                .filter { it.onLocalNotificationOpened != null }
+            if (interested.isEmpty()) {
+                enqueue(pendingLocalOpens, notification)
+            } else {
+                interested.forEach { it.onLocalNotificationOpened?.invoke(notification) }
+            }
+        }
+    }
+
     fun deliverPending(owner: NotificationsImpl) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             mainHandler.post { deliverPending(owner) }
@@ -295,6 +389,11 @@ public object NotificationsRemoteHub {
         if (owner.onRemoteTokenChanged != null) {
             while (pendingTokens.isNotEmpty()) {
                 owner.onRemoteTokenChanged?.invoke(pendingTokens.removeFirst())
+            }
+        }
+        if (owner.onLocalNotificationOpened != null) {
+            while (pendingLocalOpens.isNotEmpty()) {
+                owner.onLocalNotificationOpened?.invoke(pendingLocalOpens.removeFirst())
             }
         }
     }
@@ -340,7 +439,11 @@ internal fun uniqueWorkName(identifier: String): String = "nexa.local.notificati
 
 internal const val NOTIFICATION_CHANNEL_ID = "dev.nexa.notifications.local"
 internal const val NOTIFICATION_PREFERENCES = "dev.nexa.notifications.local"
+internal const val BADGE_PREFERENCES = "dev.nexa.notifications.badge"
+internal const val BADGE_COUNT_KEY = "count"
 internal const val LOCAL_NOTIFICATION_WORK_TAG = "dev.nexa.notifications.local"
 internal const val KEY_IDENTIFIER = "identifier"
 internal const val KEY_TITLE = "title"
 internal const val KEY_BODY = "body"
+internal const val KEY_LOCAL_OPENED = "nexa.local.opened"
+internal const val ACTION_LOCAL_NOTIFICATION_OPENED = "dev.nexa.notifications.LOCAL_OPENED"

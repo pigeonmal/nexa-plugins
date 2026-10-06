@@ -6,3 +6,6 @@ build/
 node_modules/
 *.xcuserstate
 xcuserdata/
+
+# Rust build output for plugin-owned compiler/analyzer crates.
+target/

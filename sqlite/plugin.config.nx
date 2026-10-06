@@ -5,9 +5,13 @@ plugin {
     sources {
         native: "native.nxid"
     }
+    compiler {
+        analyzer: ["cargo", "run", "--quiet", "--manifest-path", "compiler/Cargo.toml"]
+    }
     ios {
         minVersion: "13.0"
         sources: ["ios/Sources/**/*.swift"]
+        extensionSources: ["ios/Sources/**/*.swift"]
         linkerFlags: ["-lsqlite3"]
     }
     android {

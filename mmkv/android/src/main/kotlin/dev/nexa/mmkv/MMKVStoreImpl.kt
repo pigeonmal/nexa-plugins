@@ -51,13 +51,7 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         // second global registration call. Match iOS's quiet initialization;
         // MMKV's default INFO logger emits native logcat messages during
         // writes, adding work to the hot path.
-        val rootDir = MMKV.initialize(
-            NexaRuntimeCore.context().applicationContext,
-            null,
-            null,
-            MMKVLogLevel.LevelNone,
-            MMKVStoreObserver,
-        )
+        val rootDir = initializeMMKV()
         this.rootDirectory = rootDir
         this.version = MMKV.version()
         this.pageSize = MMKV.pageSize().toLong()
@@ -435,6 +429,25 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         }
         notifyObservedKeys()
         onContentChanged?.invoke()
+    }
+
+    private companion object {
+        @Volatile
+        private var initializedRootDirectory: String? = null
+
+        @Synchronized
+        private fun initializeMMKV(): String {
+            initializedRootDirectory?.let { return it }
+            val rootDir = MMKV.initialize(
+                NexaRuntimeCore.context().applicationContext,
+                null,
+                null,
+                MMKVLogLevel.LevelNone,
+                MMKVStoreObserver,
+            )
+            initializedRootDirectory = rootDir
+            return rootDir
+        }
     }
 }
 

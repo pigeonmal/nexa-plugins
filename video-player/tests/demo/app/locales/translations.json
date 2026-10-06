@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "sourceLanguage": "en",
+  "strings": {
+    "First player ended": {
+      "source": "First player ended",
+      "translations": {}
+    },
+    "Pause first player": {
+      "source": "Pause first player",
+      "translations": {}
+    },
+    "Pause second player": {
+      "source": "Pause second player",
+      "translations": {}
+    },
+    "Play first player": {
+      "source": "Play first player",
+      "translations": {}
+    },
+    "Play second player": {
+      "source": "Play second player",
+      "translations": {}
+    },
+    "Second player": {
+      "source": "Second player",
+      "translations": {}
+    },
+    "Second player ended": {
+      "source": "Second player ended",
+      "translations": {}
+    },
+    "Second view tapped": {
+      "source": "Second view tapped",
+      "translations": {}
+    },
+    "Set first volume": {
+      "source": "Set first volume",
+      "translations": {}
+    },
+    "Set second volume": {
+      "source": "Set second volume",
+      "translations": {}
+    },
+    "Tapped": {
+      "source": "Tapped",
+      "translations": {}
+    }
+  }
+}

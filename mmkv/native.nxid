@@ -68,15 +68,14 @@ native class MMKVStore {
     fn setBuffer(key: String, value: Bytes) -> Bool
     fn getBuffer(key: String) -> Bytes?
 
-    // Values without an MMKV-native type. `T` is bound per call site - from
-    // the argument for a setter, from the expected type or an explicit type
-    // argument for a getter - to a scalar, a buffer, an enum, an app struct,
-    // or a collection of those.
+    // Generic codec operations are intended for app-defined value structs.
+    // Use the typed scalar, buffer, list, set, and map methods below for those
+    // native shapes rather than encoding them through the object methods.
     //
     //     store.setObject("playerOption", options)
     //     let options: PlayerOptions? = store.getObject("playerOption")
-    fn setObject<T>(key: String, value: T) -> Bool
-    fn getObject<T>(key: String) -> T?
+    fn setObject<T: Struct>(key: String, value: T) -> Bool
+    fn getObject<T: Struct>(key: String) -> T?
     /// One encoded value per key holding an array.
     fn setList<T>(key: String, values: Array<T>) -> Bool
     fn getList<T>(key: String) -> Array<T>?

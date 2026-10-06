@@ -1,0 +1,13 @@
+error BrowserError {
+    invalidURL
+    unavailable
+    presentationUnavailable
+}
+
+/// Opens an external URL in the system browser or a platform-native in-app browser.
+native class SystemBrowser {
+    init()
+
+    /// `inApp` uses Safari's browser controller on iOS and Custom Tabs on Android.
+    async fn open(url: String, inApp: Bool) throws BrowserError
+}

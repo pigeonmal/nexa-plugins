@@ -16,7 +16,7 @@ private struct PickedMedia: Transferable {
     }
 
     private static func importFile(_ source: URL) throws -> PickedMedia {
-        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("NexaMediaPicker", isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
@@ -65,7 +65,7 @@ public struct MediaPickerControlImpl<Content: View>: View {
             selection: $selection,
             matching: isVideo ? .videos : .images
         )
-        .onChange(of: selection) { _, item in
+        .onChange(of: selection) { item in
             guard let item else { return }
             Task { await importSelection(item) }
         }

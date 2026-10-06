@@ -1,0 +1,33 @@
+/// Platform-recognized data kind.
+enum ExtractedDataKind {
+    date
+    phoneNumber
+    url
+    email
+    address
+}
+
+/// One match in the original input. `start` and `length` are UTF-16 offsets,
+/// matching native range APIs on both platforms. `timestampMillis` is supplied
+/// when the platform exposes a resolved date value.
+struct ExtractedData {
+    kind: ExtractedDataKind
+    text: String
+    start: Int32
+    length: Int32
+    timestampMillis: Int64?
+    /// True when the platform classifies a detected date as date-and-time.
+    hasTime: Bool
+    /// False when the platform cannot distinguish date-only from date-and-time.
+    timePrecisionAvailable: Bool
+}
+
+/// Uses the operating system's text recognition for dates and common data.
+/// Results are ordered by their UTF-16 start offset.
+native class DataExtractor {
+    init()
+
+    /// Detects dates, phone numbers, URLs, email addresses, and postal
+    /// addresses. Returns an empty array when the platform finds no matches.
+    async fn extract(text: String) -> Array<ExtractedData>
+}

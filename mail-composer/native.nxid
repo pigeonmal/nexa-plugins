@@ -1,0 +1,29 @@
+error MailComposerError {
+    unavailable
+    presentationUnavailable
+}
+
+enum MailComposerResult {
+    sent
+    saved
+    cancelled
+    failed
+}
+
+/// Opens the platform's native email composition flow.
+native class MailComposer {
+    init()
+
+    /// Whether a native mail composer is configured on this device.
+    readonly property available: Bool
+
+    /// Human-readable device model and operating-system version for feedback.
+    readonly property deviceInfo: String
+
+    /// Presents a message addressed to the supplied recipients.
+    async fn present(to: Array<String>, subject: String, body: String) throws MailComposerError
+
+    /// Reports the result after the iOS composer is dismissed. Android's
+    /// external mail-app chooser does not expose the delivery result.
+    event completed(result: MailComposerResult)
+}

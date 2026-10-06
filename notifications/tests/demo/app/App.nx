@@ -16,6 +16,10 @@ app NotificationsDemo {
             notifications.remoteNotificationOpened { notification ->
                 status = "Opened: \(notification.title)"
             }
+            notifications.localNotificationOpened { notification ->
+                status = "Local reminder opened: \(notification.title)"
+                Log.info(message: "NEXA_NOTIFICATIONS_LOCAL_OPENED: \(notification.identifier)")
+            }
             notifications.remoteTokenChanged { token ->
                 if token != "" {
                     status = "Notification token updated."

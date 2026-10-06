@@ -1,0 +1,16 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.data-extractor"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "13.0"
+        sources: ["ios/Sources/**/*.swift"]
+    }
+    android {
+        minSdk: 28
+        sources: ["android/src/main/kotlin/**/*.kt"]
+    }
+}

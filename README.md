@@ -7,9 +7,12 @@ Official plugin packages for [Nexa](https://github.com/pigeonmal/nexa).
 | Package | Description |
 |---|---|
 | [`@nexa/audio-player`](audio-player) | Background audio playback, track metadata, and system media controls on iOS and Android |
+| [`@nexa/browser`](browser) | System browser and native in-app browser presentation (Safari view controller and Android Custom Tabs) |
 | [`@nexa/biometrics`](biometrics) | User-triggered Face ID, Touch ID, and Android BiometricPrompt authentication |
 | [`@nexa/camera`](camera) | Camera preview, photo and video capture, barcode scanning, and optional I420 frame events |
+| [`@nexa/data-extractor`](data-extractor) | Native detection of dates, phone numbers, URLs, email addresses, and postal addresses |
 | [`@nexa/in-app-purchases`](in-app-purchases) | Typed StoreKit 2 and Google Play Billing APIs for digital products |
+| [`@nexa/mail-composer`](mail-composer) | Native email composition on iOS and Android |
 | [`@nexa/maps`](maps) | Native Apple MapKit and Google Maps views with typed pin selection |
 | [`@nexa/media-picker`](media-picker) | System photo and video picker without photo-library permission |
 | [`@nexa/mmkv`](mmkv) | Synchronous MMKV storage with encryption, typed values, and change listeners |

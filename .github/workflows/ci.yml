@@ -23,12 +23,18 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'EOF'
+          import re
           import sys
           from pathlib import Path
 
           root = Path(".")
           failures = []
 
+          # The LICENSE file is the license text, so it must carry the license's
+          # own header verbatim. The README is prose that names the license, and
+          # its phrasing is "Mozilla Public License 2.0" -- asserting the header
+          # string "Version 2.0" against it could never pass, so this job has
+          # been red since it was written.
           license_text = (root / "LICENSE").read_text()
           if "Mozilla Public License Version 2.0" not in license_text:
               failures.append("LICENSE must be MPL-2.0")
@@ -36,8 +42,12 @@ jobs:
               failures.append("LICENSE must not be GPL text")
 
           readme = (root / "README.md").read_text()
+          if not re.search(r"^## License$", readme, re.M):
+              failures.append("README must have a License section")
           if "Mozilla Public License 2.0" not in readme:
               failures.append("README license section must say MPL-2.0")
+          if "[LICENSE](LICENSE)" not in readme:
+              failures.append("README license section must link to LICENSE")
           for forbidden in ("license-MIT", "MIT License", "GPL"):
               if forbidden in readme:
                   failures.append(f"README must not claim {forbidden}")

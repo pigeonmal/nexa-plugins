@@ -72,3 +72,9 @@ The `iOS min` and `Android minSdk` columns are the values each `plugin.config.nx
 | `nexa plugin generate plugins/sensor --target swift --out generated/swift` | Generate a contract binding; `kotlin` and compatible `cpp` targets are also available. |
 
 `nexa plugin check` validates the declared package surface. Native build checks require the corresponding platform toolchain and package dependencies.
+
+---
+
+## License
+
+Nexa plugins are open-source software licensed under the **Mozilla Public License 2.0 (MPL-2.0)**. See [LICENSE](LICENSE) for details.

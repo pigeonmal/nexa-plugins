@@ -9,7 +9,7 @@ struct Note {
     archived: Bool
 }
 
-app SQLiteConformance {
+class DatabaseHelper {
     let database = SQLite.Database("conformance", false)
     let migrations = [
         SQLite.Migration(1, [
@@ -19,6 +19,172 @@ app SQLiteConformance {
             "ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
         ]),
     ]
+    let notes = database.observeQuery<Note>("SELECT id, title, score, payload, optional_text AS optionalText, archived FROM notes", [])
+
+    async fn migrate() -> Int32 {
+        try {
+            let version = await database.migrate(migrations)
+            return version
+        } catch {
+            else {
+                return -1
+            }
+        }
+    }
+
+    async fn currentVersion() -> Int32 {
+        try {
+            let version = await database.userVersion()
+            return version
+        } catch {
+            else {
+                return -1
+            }
+        }
+    }
+
+    async fn insertInitialNotes() -> Array<SQLite.ExecutionResult> {
+        try {
+            let results = await database.executeTransaction([
+                SQLite.Statement(
+                    "INSERT OR REPLACE INTO notes (id, title, score, payload, optional_text, archived) VALUES (?, ?, ?, ?, ?, ?)",
+                    [41, "nexa", 2.5, Bytes.fromText(text: "blob-value"), null, false]
+                ),
+                SQLite.Statement(
+                    "UPDATE notes SET archived = ? WHERE id = ?",
+                    [true, 41]
+                ),
+            ])
+            return results
+        } catch {
+            else {
+                return []
+            }
+        }
+    }
+
+    async fn updateArchived(id: Int64, archived: Bool) -> SQLite.ExecutionResult {
+        try {
+            let res = await database.execute(
+                "UPDATE notes SET archived = ? WHERE id = ?",
+                [archived, id]
+            )
+            return res
+        } catch {
+            else {
+                return SQLite.ExecutionResult(0, 0)
+            }
+        }
+    }
+
+    async fn insertNote(title: String, score: Float64) -> SQLite.ExecutionResult {
+        try {
+            let autoIncrementID: Int64? = null
+            let res = await database.execute(
+                "INSERT INTO notes (id, title, score, payload, optional_text, archived) VALUES (?, ?, ?, ?, ?, ?)",
+                [autoIncrementID, title, score, null, null, false]
+            )
+            return res
+        } catch {
+            else {
+                return SQLite.ExecutionResult(0, 0)
+            }
+        }
+    }
+
+    async fn insertBatch(rows: Array<Array<SQLite.Value>>) -> SQLite.ExecutionResult {
+        try {
+            let res = await database.executeBatch(
+                "INSERT OR REPLACE INTO notes (id, title, score, payload, optional_text, archived) VALUES (?, ?, ?, ?, ?, ?)",
+                rows
+            )
+            return res
+        } catch {
+            else {
+                return SQLite.ExecutionResult(0, 0)
+            }
+        }
+    }
+
+    async fn findNote(id: Int64) -> Array<Note> {
+        try {
+            let res: Array<Note> = await database.query(
+                "SELECT id, title, score, payload, optional_text AS optionalText, archived FROM notes WHERE id = ?",
+                [id]
+            )
+            return res
+        } catch {
+            else {
+                return []
+            }
+        }
+    }
+
+    async fn findRawNote(id: Int64) -> SQLite.QueryResult {
+        try {
+            let res = await database.queryRaw(
+                "SELECT id, title FROM notes WHERE id = ?",
+                [id]
+            )
+            return res
+        } catch {
+            else {
+                return SQLite.QueryResult([], [])
+            }
+        }
+    }
+
+    async fn attemptFailingTransaction() -> String {
+        try {
+            await database.executeTransaction([
+                SQLite.Statement(
+                    "INSERT INTO notes (id, title, score) VALUES (?, ?, ?)",
+                    [45, "rollback", 1.0]
+                ),
+                SQLite.Statement("INSERT INTO missing_table VALUES (1)", []),
+            ])
+            return ""
+        } catch {
+            case SQLite.Failure.transactionFailed(message) {
+                return message
+            }
+            else {
+                return "unexpected"
+            }
+        }
+    }
+
+    fn attach(subscription: SQLite.InvalidationSubscription) -> Void {
+        database.attach(subscription)
+    }
+
+    fn dispose() -> Void {
+        database.dispose()
+    }
+}
+
+component NoteRow(note: Note, index: Int32) {
+    body {
+        Row {
+            Text("#\(index) \(note.title)")
+            Text("(\(note.score))")
+        }
+    }
+}
+
+component ReactiveNoteList(notes: Signal<Array<Note>>) {
+    body {
+        Column {
+            Text("Observed notes: \(notes.value.count)")
+            FastList(notes.value, key: .title) { note, index in
+                NoteRow(note: note, index: index)
+            }
+        }
+    }
+}
+
+app SQLiteConformance {
+    let dbHelper = DatabaseHelper()
 
     state status = "Waiting for SQLite"
     state invalidationSubscription = SQLite.InvalidationSubscription()
@@ -29,180 +195,96 @@ app SQLiteConformance {
     state directExecution = SQLite.ExecutionResult(0, 0)
     state batchExecution = SQLite.ExecutionResult(0, 0)
     state selected: Array<Note> = []
-    state observedNotes: Signal<Array<Note>> = database.observeQuery<Note>("SELECT id, title, score, payload, optional_text AS optionalText, archived FROM notes", [])
+    state observedNotes: Signal<Array<Note>> = dbHelper.notes
     state rawSelected = SQLite.QueryResult([], [])
     state rollbackError = ""
     state afterRollback = SQLite.QueryResult([], [])
 
     body {
         OnAppear async {
-            database.attach(invalidationSubscription)
+            dbHelper.attach(invalidationSubscription)
             invalidationSubscription.invalidated {
                 invalidationCount += 1
             }
 
-            try {
-                migratedVersion = await database.migrate(migrations)
-                currentVersion = await database.userVersion()
-                if migratedVersion == 2 && currentVersion == 2 {
-                    Log.info(message: "SQLITE_MIGRATION_PASS")
-                } else {
-                    Log.error(message: "SQLITE_MIGRATION_FAIL")
-                }
-
-                inserted = await database.executeTransaction([
-                    SQLite.Statement(
-                        "INSERT OR REPLACE INTO notes (id, title, score, payload, optional_text, archived) VALUES (?, ?, ?, ?, ?, ?)",
-                        [41, "nexa", 2.5, Bytes.fromText(text: "blob-value"), null, false]
-                    ),
-                    SQLite.Statement(
-                        "UPDATE notes SET archived = ? WHERE id = ?",
-                        [true, 41]
-                    ),
-                ])
-                if inserted.count == 2 && inserted[0].rowsAffected == 1 {
-                    Log.info(message: "SQLITE_TRANSACTION_COMMIT_PASS")
-                } else {
-                    Log.error(message: "SQLITE_TRANSACTION_COMMIT_FAIL")
-                }
-
-                directExecution = await database.execute(
-                    "UPDATE notes SET archived = ? WHERE id = ?",
-                    [false, 41]
-                )
-                if directExecution.rowsAffected == 1 && directExecution.lastInsertRowId == 0 {
-                    Log.info(message: "SQLITE_EXECUTE_PASS")
-                } else {
-                    Log.error(message: "SQLITE_EXECUTE_FAIL")
-                }
-
-                let autoIncrementID: Int64? = null
-                let autoIncrementExecution = await database.execute(
-                    "INSERT INTO notes (id, title, score, payload, optional_text, archived) VALUES (?, ?, ?, ?, ?, ?)",
-                    [autoIncrementID, "auto increment", 0.5, null, null, false]
-                )
-                let autoIncrementNotes: Array<Note> = await database.query(
-                    "SELECT id, title, score, payload, optional_text AS optionalText, archived FROM notes WHERE id = ?",
-                    [autoIncrementExecution.lastInsertRowId]
-                )
-                if autoIncrementNotes.count == 1
-                    && (autoIncrementNotes[0].id ?? 0) == autoIncrementExecution.lastInsertRowId {
-                    Log.info(message: "SQLITE_OPTIONAL_ID_PASS")
-                } else {
-                    Log.error(message: "SQLITE_OPTIONAL_ID_FAIL")
-                }
-
-                batchExecution = await database.executeBatch(
-                    "INSERT OR REPLACE INTO notes (id, title, score, payload, optional_text, archived) VALUES (?, ?, ?, ?, ?, ?)",
-                    [
-                        [43, "batch one", 3.5, null, null, true],
-                        [44, "batch two", 4.5, Bytes.fromText(text: "batch"), "saved", false],
-                    ]
-                )
-                if batchExecution.rowsAffected == 2 && batchExecution.lastInsertRowId == 44 {
-                    Log.info(message: "SQLITE_BATCH_PASS")
-                } else {
-                    Log.error(message: "SQLITE_BATCH_FAIL")
-                }
-
-                selected = await database.query(
-                    "SELECT id, title, score, payload, optional_text AS optionalText, archived FROM notes WHERE id = ?",
-                    [41]
-                )
-                let expectedSelectedID: Int64 = 41
-                if selected.count == 1
-                    && (selected[0].id ?? expectedSelectedID) == expectedSelectedID
-                    && selected[0].title == "nexa"
-                    && selected[0].score == 2.5
-                    && Bytes.count(bytes: selected[0].payload ?? Bytes.fromText(text: "")) == 10
-                    && selected[0].optionalText == null
-                    && !selected[0].archived {
-                    Log.info(message: "SQLITE_TYPED_QUERY_PASS")
-                    status = "SQLite query passed"
-                } else {
-                    Log.error(message: "SQLITE_TYPED_QUERY_FAIL")
-                }
-
-                rawSelected = await database.queryRaw(
-                    "SELECT id, title FROM notes WHERE id = ?",
-                    [41]
-                )
-                if rawSelected.columnNames.count == 2 && rawSelected.rows.count == 1 {
-                    Log.info(message: "SQLITE_RAW_QUERY_PASS")
-                } else {
-                    Log.error(message: "SQLITE_RAW_QUERY_FAIL")
-                }
-
-                try {
-                    inserted = await database.executeTransaction([
-                        SQLite.Statement(
-                            "INSERT INTO notes (id, title, score) VALUES (?, ?, ?)",
-                            [45, "rollback", 1.0]
-                        ),
-                        SQLite.Statement("INSERT INTO missing_table VALUES (1)", []),
-                    ])
-                    Log.error(message: "SQLITE_TRANSACTION_ROLLBACK_FAIL")
-                } catch {
-                    case SQLite.Failure.transactionFailed(message) {
-                        rollbackError = message
-                    }
-                    else {
-                        Log.error(message: "SQLITE_TRANSACTION_UNEXPECTED_FAIL")
-                    }
-                }
-                afterRollback = await database.queryRaw(
-                    "SELECT id FROM notes WHERE id = ?",
-                    [45]
-                )
-                if afterRollback.rows.isEmpty && rollbackError != "" {
-                    Log.info(message: "SQLITE_TRANSACTION_ROLLBACK_PASS")
-                } else {
-                    Log.error(message: "SQLITE_TRANSACTION_ROLLBACK_FAIL")
-                }
-
-                if invalidationCount > 0 {
-                    Log.info(message: "SQLITE_REACTIVE_INVALIDATION_PASS")
-                } else {
-                    Log.error(message: "SQLITE_REACTIVE_INVALIDATION_FAIL")
-                }
-                database.dispose()
-                Log.info(message: "SQLITE_DISPOSE_PASS")
-
-            } catch {
-                case SQLite.Failure.appGroupUnavailable {
-                    Log.error(message: "SQLITE_APP_GROUP_UNAVAILABLE")
-                }
-                case SQLite.Failure.invalidDatabaseName(message) {
-                    Log.error(message: "SQLITE_INVALID_NAME: \(message)")
-                }
-                case SQLite.Failure.openFailed(message) {
-                    Log.error(message: "SQLITE_OPEN_FAIL: \(message)")
-                }
-                case SQLite.Failure.invalidValue(message) {
-                    Log.error(message: "SQLITE_VALUE_FAIL: \(message)")
-                }
-                case SQLite.Failure.prepareFailed(message) {
-                    Log.error(message: "SQLITE_PREPARE_FAIL: \(message)")
-                }
-                case SQLite.Failure.bindFailed(message) {
-                    Log.error(message: "SQLITE_BIND_FAIL: \(message)")
-                }
-                case SQLite.Failure.executeFailed(message) {
-                    Log.error(message: "SQLITE_EXECUTE_FAIL: \(message)")
-                }
-                case SQLite.Failure.queryFailed(message) {
-                    Log.error(message: "SQLITE_QUERY_FAIL: \(message)")
-                }
-                case SQLite.Failure.transactionFailed(message) {
-                    Log.error(message: "SQLITE_TRANSACTION_FAIL: \(message)")
-                }
-                case SQLite.Failure.migrationFailed(message) {
-                    Log.error(message: "SQLITE_MIGRATION_FAIL: \(message)")
-                }
-                case SQLite.Failure.closed {
-                    Log.error(message: "SQLITE_CLOSED")
-                }
+            migratedVersion = await dbHelper.migrate()
+            currentVersion = await dbHelper.currentVersion()
+            if migratedVersion == 2 && currentVersion == 2 {
+                Log.info(message: "SQLITE_MIGRATION_PASS")
+            } else {
+                Log.error(message: "SQLITE_MIGRATION_FAIL")
             }
+
+            inserted = await dbHelper.insertInitialNotes()
+            if inserted.count == 2 && inserted[0].rowsAffected == 1 {
+                Log.info(message: "SQLITE_TRANSACTION_COMMIT_PASS")
+            } else {
+                Log.error(message: "SQLITE_TRANSACTION_COMMIT_FAIL")
+            }
+
+            directExecution = await dbHelper.updateArchived(41, false)
+            if directExecution.rowsAffected == 1 && directExecution.lastInsertRowId == 0 {
+                Log.info(message: "SQLITE_EXECUTE_PASS")
+            } else {
+                Log.error(message: "SQLITE_EXECUTE_FAIL")
+            }
+
+            let autoIncrementExecution = await dbHelper.insertNote("auto increment", 0.5)
+            let autoIncrementNotes: Array<Note> = await dbHelper.findNote(autoIncrementExecution.lastInsertRowId)
+            if autoIncrementNotes.count == 1
+                && (autoIncrementNotes[0].id ?? 0) == autoIncrementExecution.lastInsertRowId {
+                Log.info(message: "SQLITE_OPTIONAL_ID_PASS")
+            } else {
+                Log.error(message: "SQLITE_OPTIONAL_ID_FAIL")
+            }
+
+            batchExecution = await dbHelper.insertBatch([
+                [43, "batch one", 3.5, null, null, true],
+                [44, "batch two", 4.5, Bytes.fromText(text: "batch"), "saved", false],
+            ])
+            if batchExecution.rowsAffected == 2 && batchExecution.lastInsertRowId == 44 {
+                Log.info(message: "SQLITE_BATCH_PASS")
+            } else {
+                Log.error(message: "SQLITE_BATCH_FAIL")
+            }
+
+            selected = await dbHelper.findNote(41)
+            let expectedSelectedID: Int64 = 41
+            if selected.count == 1
+                && (selected[0].id ?? expectedSelectedID) == expectedSelectedID
+                && selected[0].title == "nexa"
+                && selected[0].score == 2.5
+                && Bytes.count(bytes: selected[0].payload ?? Bytes.fromText(text: "")) == 10
+                && selected[0].optionalText == null
+                && !selected[0].archived {
+                Log.info(message: "SQLITE_TYPED_QUERY_PASS")
+                status = "SQLite query passed"
+            } else {
+                Log.error(message: "SQLITE_TYPED_QUERY_FAIL")
+            }
+
+            rawSelected = await dbHelper.findRawNote(41)
+            if rawSelected.columnNames.count == 2 && rawSelected.rows.count == 1 {
+                Log.info(message: "SQLITE_RAW_QUERY_PASS")
+            } else {
+                Log.error(message: "SQLITE_RAW_QUERY_FAIL")
+            }
+
+            rollbackError = await dbHelper.attemptFailingTransaction()
+            afterRollback = await dbHelper.findRawNote(45)
+            if afterRollback.rows.isEmpty && rollbackError != "" {
+                Log.info(message: "SQLITE_TRANSACTION_ROLLBACK_PASS")
+            } else {
+                Log.error(message: "SQLITE_TRANSACTION_ROLLBACK_FAIL")
+            }
+
+            if invalidationCount > 0 {
+                Log.info(message: "SQLITE_REACTIVE_INVALIDATION_PASS")
+            } else {
+                Log.error(message: "SQLITE_REACTIVE_INVALIDATION_FAIL")
+            }
+            dbHelper.dispose()
+            Log.info(message: "SQLITE_DISPOSE_PASS")
         }
         OnDisappear {
             invalidationSubscription.dispose()
@@ -210,7 +292,7 @@ app SQLiteConformance {
         Column {
             Text("SQLite conformance")
             Text(status)
-            Text("Observed notes: \(observedNotes.value.count)")
+            ReactiveNoteList(notes: observedNotes)
         }
     }
 }

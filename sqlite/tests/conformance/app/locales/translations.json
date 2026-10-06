@@ -2,6 +2,28 @@
   "format": 1,
   "sourceLanguage": "en",
   "strings": {
+    "#{index} {title}": {
+      "source": "#{index} {title}",
+      "arguments": [
+        "index",
+        "title"
+      ],
+      "argument_types": [
+        "Int32",
+        "String"
+      ],
+      "translations": {}
+    },
+    "({score})": {
+      "source": "({score})",
+      "arguments": [
+        "score"
+      ],
+      "argument_types": [
+        "Float64"
+      ],
+      "translations": {}
+    },
     "Observed notes: {count}": {
       "source": "Observed notes: {count}",
       "arguments": [

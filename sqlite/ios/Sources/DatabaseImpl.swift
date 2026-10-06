@@ -258,6 +258,24 @@ public final class DatabaseImpl: DatabaseSpec {
         darwinSync.dispose()
         connection.close()
     }
+
+    /// Backstop for a handle whose owner was released without an explicit
+    /// `dispose()`.
+    ///
+    /// `close()` is what calls `sqlite3_close_v2`, and a raw SQLite pointer is
+    /// invisible to ARC: releasing this object without `dispose()` leaks the
+    /// database file handle and its WAL for the life of the process. Callers
+    /// should still dispose explicitly -- `OnDisappear` is the documented place,
+    /// and an explicit call wins because `dispose()` is idempotent -- but a
+    /// forgotten call should not cost a file descriptor.
+    ///
+    /// Only the connection is closed here. `deinit` runs outside the main
+    /// actor, so it cannot call the `@MainActor` `dispose()`, and it does not
+    /// need to: releasing `darwinSync` runs that object's own `deinit`, which
+    /// removes the Darwin notification observer.
+    deinit {
+        connection.close()
+    }
 }
 
 /// Independent subscription handles keep one screen from replacing another's callback.

@@ -323,6 +323,32 @@ public class DatabaseImpl(
         }
     }
 
+    /// Backstop for a handle whose owner was released without an explicit
+    /// `dispose()`.
+    ///
+    /// `PlatformSQLiteDatabase.close()` is what releases the SQLite file
+    /// descriptor and its WAL, and nothing else does it. Callers should still
+    /// dispose explicitly -- `OnDisappear` is the documented place, and an
+    /// explicit call wins because `dispose()` is idempotent -- but a forgotten
+    /// call should not cost a file descriptor.
+    ///
+    /// The close is awaited rather than launched so that it cannot be lost if
+    /// the coroutine that owns `ioScope` is torn down during collection.
+    @Suppress("deprecation")
+    protected fun finalize() {
+        if (disposed.compareAndSet(false, true)) {
+            try {
+                NexaRuntimeCore.context().applicationContext.contentResolver
+                    .unregisterContentObserver(observer)
+            } catch (_: Exception) {
+            }
+            synchronized(lock) {
+                database?.close()
+                database = null
+            }
+        }
+    }
+
     private fun requireDatabase(): PlatformSQLiteDatabase {
         if (disposed.get()) throw Failure.closed
         openFailure?.let { throw it }

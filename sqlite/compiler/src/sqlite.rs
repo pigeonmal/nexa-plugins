@@ -41,6 +41,12 @@ struct DatabaseQueryDecl {
     sql: String,
     span: nexa_diagnostics::Span,
     source_file: Option<String>,
+    /// Bind parameters present in the source array, counted even when their
+    /// types are unknown.
+    parameter_count: usize,
+    /// The parameter types could not be inferred, so only the count and the SQL
+    /// are checked. See [`lenient_parameter_types`].
+    allow_dynamic_parameters: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -375,8 +381,15 @@ fn validate_query(
             ),
         ));
     }
-    if positional_parameters {
-        validate_positional_parameter_slots(&statement, params.len(), query.span, &query.name)?
+    // When the parameter types were out of reach the count is still checked,
+    // against the SQL's own bind slots, so an arity mistake is still caught.
+    if query.allow_dynamic_parameters || positional_parameters {
+        validate_positional_parameter_slots(
+            &statement,
+            query.parameter_count,
+            query.span,
+            &query.name,
+        )?
     } else {
         validate_parameter_slots(&statement, &params, query.span, &query.name)?
     };
@@ -1166,8 +1179,8 @@ mod ordinary_call_tests {
     use super::validate_ordinary_calls;
 
     fn app_from_source(source: &str) -> nexa_syntax::ast::App {
-        let program = nexa_syntax::parse_program(source).expect("valid test source");
-        let mut app = program.app.expect("app declaration");
+        let mut program = nexa_syntax::parse_program(source).expect("valid test source");
+        let mut app = program.app.take().expect("app declaration");
         app.plugins = program.plugins;
         app.structs = program.structs;
         app.globals = program.globals;
@@ -1176,6 +1189,10 @@ mod ordinary_call_tests {
         app.enums = program.enums;
         app.components = program.components;
         app.screens = program.screens;
+        // The app body is retained. It was previously dropped here, so every test
+        // in this module exercised declarations only -- while real applications
+        // put `migrate`, writes, and queries in the body's `OnAppear async`
+        // block. That omission hid the entire node-walking path.
         app
     }
 
@@ -1658,8 +1675,10 @@ pub(crate) fn validate_ordinary_calls(
                     .ok_or_else(|| {
                         CompileError::new(*span, format!("SQLite.Database.{name} requires a parameter array"))
                     })?;
-                let parameters =
-                    static_parameter_types(parameters_expr, environment, &app.structs)?;
+                let inferred =
+                    lenient_parameter_types(parameters_expr, environment, &app.structs)?;
+                let parameter_count = bind_parameter_count(parameters_expr)?;
+                let parameters = inferred.clone().unwrap_or_default();
                 let result_type =
                     TypeSyntax::Generic("Array".to_owned(), vec![row_type.clone()], *span);
                 database.queries.push(DatabaseQueryDecl {
@@ -1669,6 +1688,8 @@ pub(crate) fn validate_ordinary_calls(
                     sql,
                     span: *span,
                     source_file: current_source_file.borrow().clone(),
+                    parameter_count,
+                    allow_dynamic_parameters: inferred.is_none(),
                 });
             }
             "execute" => {
@@ -1689,14 +1710,14 @@ pub(crate) fn validate_ordinary_calls(
                             "SQLite.Database.execute requires a parameter array",
                         )
                     })?;
-                let parameters =
-                    static_parameter_types(parameters_expr, environment, &app.structs)?;
+                let inferred =
+                    lenient_parameter_types(parameters_expr, environment, &app.structs)?;
                 database.commands.push(DatabaseCommandDecl {
                     name: format!("execute_{}_{}", span.line, span.column),
-                    parameters,
+                    parameters: inferred.clone().unwrap_or_default(),
                     sql,
                     span: *span,
-                    allow_dynamic_parameters: false,
+                    allow_dynamic_parameters: inferred.is_none(),
                 });
             }
             "executeBatch" => {
@@ -1716,12 +1737,24 @@ pub(crate) fn validate_ordinary_calls(
                     })?;
                 let (parameters, allow_dynamic_parameters) = match rows_expr {
                     ast::Expr::Array(rows, _) if !rows.is_empty() => {
-                        let parameters =
-                            static_parameter_types(&rows[0], environment, &app.structs)?;
+                        // Rows are compared against row 1. When any row's value
+                        // types are out of the analyzer's reach -- a plugin call
+                        // such as `Bytes.fromText(...)`, a member read from a
+                        // contract struct -- the batch degrades to an arity
+                        // comparison rather than being rejected, because
+                        // disagreeing row widths are the mistake that actually
+                        // happens here.
+                        let first_arity = bind_parameter_count(&rows[0])?;
+                        let first_types = lenient_parameter_types(&rows[0], environment, &app.structs)?;
                         for (row_index, row) in rows.iter().enumerate().skip(1) {
-                            let row_parameters =
-                                static_parameter_types(row, environment, &app.structs)?;
-                            if !same_parameter_types(&parameters, &row_parameters) {
+                            let row_arity = bind_parameter_count(row)?;
+                            let row_types =
+                                lenient_parameter_types(row, environment, &app.structs)?;
+                            let mismatched = match (&first_types, &row_types) {
+                                (Some(first), Some(current)) => !same_parameter_types(first, current),
+                                _ => row_arity != first_arity,
+                            };
+                            if mismatched {
                                 return Err(CompileError::new(
                                     row.span(),
                                     format!(
@@ -1731,7 +1764,8 @@ pub(crate) fn validate_ordinary_calls(
                                 ));
                             }
                         }
-                        (parameters, false)
+                        let dynamic = first_types.is_none();
+                        (first_types.unwrap_or_default(), dynamic)
                     }
                     ast::Expr::Array(_, _) => (Vec::new(), true),
                     _ => {
@@ -1770,26 +1804,76 @@ pub(crate) fn validate_ordinary_calls(
         )?;
     }
     for component in &app.components {
+        // A component's own state types have to be visible while its body is
+        // walked, or `todos = await store.query(...)` inside a `Button` action
+        // block has no expected type and therefore no row type.
+        let mut scope_environment = module_environment.clone();
+        for parameter in &component.parameters {
+            scope_environment.insert(parameter.name.clone(), parameter.ty.clone());
+        }
+        for state in &component.states {
+            if let Some(ty) = state
+                .ty
+                .clone()
+                .or_else(|| infer_static_type(&state.initial, &scope_environment, &app.structs))
+            {
+                scope_environment.insert(state.name.clone(), ty);
+            }
+        }
         for state in &component.states {
             *current_source_file.borrow_mut() = state.source_file.clone();
             inspect_expression_calls_with_expected(
                 &state.initial,
-                &module_environment,
+                &scope_environment,
                 state.ty.as_ref(),
                 &mut inspect_call,
             )?;
         }
+        inspect_nodes(
+            &component.body,
+            &scope_environment,
+            &mut inspect_call,
+            &app.structs,
+        )?;
     }
+    // The app body carries the lifecycle blocks (`OnAppear async { ... }`) that
+    // own startup migrations and subscription attachment, so it must be walked
+    // for the schema to be known at all.
+    inspect_nodes(
+        &app.body,
+        &module_environment,
+        &mut inspect_call,
+        &app.structs,
+    )?;
     for screen in &app.screens {
+        let mut scope_environment = module_environment.clone();
+        for parameter in &screen.parameters {
+            scope_environment.insert(parameter.name.clone(), parameter.ty.clone());
+        }
+        for state in &screen.states {
+            if let Some(ty) = state
+                .ty
+                .clone()
+                .or_else(|| infer_static_type(&state.initial, &scope_environment, &app.structs))
+            {
+                scope_environment.insert(state.name.clone(), ty);
+            }
+        }
         for state in &screen.states {
             *current_source_file.borrow_mut() = state.source_file.clone();
             inspect_expression_calls_with_expected(
                 &state.initial,
-                &module_environment,
+                &scope_environment,
                 state.ty.as_ref(),
                 &mut inspect_call,
             )?;
         }
+        inspect_nodes(
+            &screen.body,
+            &scope_environment,
+            &mut inspect_call,
+            &app.structs,
+        )?;
     }
     for class in &app.classes {
         for field in class.fields.iter().chain(&class.static_fields) {
@@ -1812,6 +1896,7 @@ pub(crate) fn validate_ordinary_calls(
                 .iter()
                 .map(|parameter| (parameter.name.clone(), parameter.ty.clone())),
         );
+        environment.insert(RETURN_TYPE_KEY.to_owned(), function.return_type.clone());
         inspect_statements(
             &function.body,
             &mut environment,
@@ -1823,6 +1908,20 @@ pub(crate) fn validate_ordinary_calls(
         for function in class.methods.iter().chain(&class.static_methods) {
             *current_source_file.borrow_mut() = function.source_file.clone();
             let mut environment = module_environment.clone();
+            environment.insert(RETURN_TYPE_KEY.to_owned(), function.return_type.clone());
+            // A method body sees its own class's fields under their bare names,
+            // which is how instance code refers to them. Without this a query
+            // assigned to a field-typed target inside a method had no expected
+            // type and therefore no row type.
+            for field in class.fields.iter().chain(&class.static_fields) {
+                if let Some(ty) = field
+                    .ty
+                    .clone()
+                    .or_else(|| infer_static_type(&field.initial, &environment, &app.structs))
+                {
+                    environment.insert(field.name.clone(), ty);
+                }
+            }
             environment.extend(
                 function
                     .parameters
@@ -1856,29 +1955,33 @@ fn expected_query_row_type<'a>(
     structs: &[StructDecl],
 ) -> Option<&'a TypeSyntax> {
     let expected = expected?;
-    let row_candidate = match expected {
-        TypeSyntax::Generic(name, arguments, _) if name == "Array" && arguments.len() == 1 => {
-            &arguments[0]
-        }
-        TypeSyntax::Generic(name, arguments, _) if name == "Signal" && arguments.len() == 1 => {
-            match &arguments[0] {
-                TypeSyntax::Generic(inner_name, inner_arguments, _)
-                    if inner_name == "Array" && inner_arguments.len() == 1 =>
-                {
-                    &inner_arguments[0]
-                }
-                _ => return None,
+    // Peels the containers a typed query's result can arrive in. `Signal<Array<T>>`
+    // is what a reactive query returns; `Result<Array<T>, E>` is what a fallible
+    // one returns from an idiomatic `Ok(await ... ?)` method. Handling only the
+    // bare array meant the two shapes that real code actually uses both had to
+    // carry an explicit `query<T>` type argument.
+    let mut candidate = expected;
+    loop {
+        match candidate {
+            TypeSyntax::Generic(name, arguments, _) if name == "Array" && arguments.len() == 1 => {
+                candidate = &arguments[0];
+                break;
             }
+            TypeSyntax::Generic(name, arguments, _)
+                if (name == "Signal" || name == "Result") && arguments.len() >= 1 =>
+            {
+                candidate = &arguments[0];
+            }
+            _ => return None,
         }
-        _ => return None,
-    };
-    let TypeSyntax::Named(row_name, _) = row_candidate else {
+    }
+    let TypeSyntax::Named(row_name, _) = candidate else {
         return None;
     };
     structs
         .iter()
         .any(|structure| structure.name == *row_name)
-        .then_some(row_candidate)
+        .then_some(candidate)
 }
 
 fn is_sql_value_matrix_type(ty: Option<&TypeSyntax>, namespace: &str) -> bool {
@@ -1894,6 +1997,163 @@ fn is_sql_value_matrix_type(ty: Option<&TypeSyntax>, namespace: &str) -> bool {
     outer == "Array"
         && inner == "Array"
         && (value_type == "Value" || value_type == &format!("{namespace}.Value"))
+}
+
+/// Walks a UI node tree, inspecting every expression it contains.
+///
+/// A database call is usually made inside an action or lifecycle block —
+/// `OnAppear async { await database.migrate(...) }`, `Button("Save") { ... }`,
+/// `.onRefresh { ... }`, a plugin event handler — not in a declaration. Before
+/// this existed the analyzer inspected only declaration initializers and
+/// function bodies, so every such call was invisible: writes were never
+/// validated, and a database whose only `migrate` call sat in `OnAppear` was
+/// reported as having no schema at all.
+///
+/// The walk is deliberately structural. It visits every expression and action
+/// block it can reach, so a missed call becomes a missed *diagnostic* rather
+/// than a wrong one.
+fn inspect_nodes(
+    nodes: &[ast::Node],
+    environment: &HashMap<String, TypeSyntax>,
+    inspect: &mut impl FnMut(
+        &ast::Expr,
+        &HashMap<String, TypeSyntax>,
+        Option<&TypeSyntax>,
+    ) -> Result<(), CompileError>,
+    structs: &[StructDecl],
+) -> Result<(), CompileError> {
+    for node in nodes {
+        match node {
+            ast::Node::Platform { children, .. } => {
+                inspect_nodes(children, environment, inspect, structs)?;
+            }
+            ast::Node::ComponentInvocation(invocation) => {
+                for expression in &invocation.positional {
+                    inspect_expression_calls(expression, environment, inspect)?;
+                }
+                for expression in invocation.arguments.values() {
+                    inspect_expression_calls(expression, environment, inspect)?;
+                }
+                match &invocation.children {
+                    ast::ChildBody::None => {}
+                    ast::ChildBody::Nodes(children) => {
+                        inspect_nodes(children, environment, inspect, structs)?;
+                    }
+                    ast::ChildBody::Actions(actions) => {
+                        inspect_statements(actions, &mut environment.clone(), inspect, structs)?;
+                    }
+                    ast::ChildBody::Tabs(tabs) => {
+                        for tab in tabs {
+                            for expression in [
+                                Some(&tab.index),
+                                Some(&tab.label),
+                                tab.icon.as_ref(),
+                                tab.badge.as_ref(),
+                                tab.role.as_ref(),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            {
+                                inspect_expression_calls(expression, environment, inspect)?;
+                            }
+                            inspect_nodes(&tab.children, environment, inspect, structs)?;
+                        }
+                    }
+                    ast::ChildBody::SplitPanes { sidebar, detail } => {
+                        inspect_nodes(sidebar, environment, inspect, structs)?;
+                        inspect_nodes(detail, environment, inspect, structs)?;
+                    }
+                    ast::ChildBody::Rows(rows) => {
+                        inspect_nodes(&rows.children, environment, inspect, structs)?;
+                    }
+                }
+                for modifier in &invocation.modifiers {
+                    for expression in modifier.arguments.values() {
+                        inspect_expression_calls(expression, environment, inspect)?;
+                    }
+                    match &modifier.body {
+                        ast::ModifierBody::None => {}
+                        ast::ModifierBody::Actions(actions) => {
+                            inspect_statements(
+                                actions,
+                                &mut environment.clone(),
+                                inspect,
+                                structs,
+                            )?;
+                        }
+                        ast::ModifierBody::EventActions { actions, .. } => {
+                            inspect_statements(
+                                actions,
+                                &mut environment.clone(),
+                                inspect,
+                                structs,
+                            )?;
+                        }
+                        ast::ModifierBody::Nodes(children) => {
+                            inspect_nodes(children, environment, inspect, structs)?;
+                        }
+                    }
+                }
+            }
+            ast::Node::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
+                inspect_expression_calls(condition, environment, inspect)?;
+                inspect_nodes(then_body, environment, inspect, structs)?;
+                if let Some(else_body) = else_body {
+                    inspect_nodes(else_body, environment, inspect, structs)?;
+                }
+            }
+            ast::Node::When {
+                value,
+                cases,
+                else_body,
+                ..
+            } => {
+                inspect_expression_calls(value, environment, inspect)?;
+                for case in cases {
+                    inspect_expression_calls(&case.value, environment, inspect)?;
+                    inspect_nodes(&case.body, environment, inspect, structs)?;
+                }
+                inspect_nodes(else_body, environment, inspect, structs)?;
+            }
+            ast::Node::ComponentCall {
+                arguments, children, ..
+            } => {
+                for expression in arguments.values() {
+                    inspect_expression_calls(expression, environment, inspect)?;
+                }
+                if let Some(children) = children {
+                    inspect_nodes(children, environment, inspect, structs)?;
+                }
+            }
+            ast::Node::NativeComponentCall {
+                arguments,
+                children,
+                event_handlers,
+                ..
+            } => {
+                for expression in arguments.values() {
+                    inspect_expression_calls(expression, environment, inspect)?;
+                }
+                if let Some(children) = children {
+                    inspect_nodes(children, environment, inspect, structs)?;
+                }
+                for handler in event_handlers {
+                    inspect_statements(
+                        &handler.actions,
+                        &mut environment.clone(),
+                        inspect,
+                        structs,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn inspect_statements(
@@ -1922,8 +2182,36 @@ fn inspect_statements(
                     environment.insert(name.clone(), ty);
                 }
             }
-            ast::Stmt::Assign { value, .. } | ast::Stmt::Return { value, .. } => {
-                inspect_expression_calls(value, environment, inspect)?
+            ast::Stmt::Assign { name, value, .. } => {
+                // The assignment target's declared type is what tells a typed
+                // query its row type. Without this, the ordinary pattern
+                // `state notes: Array<Note> = []` followed by
+                // `notes = await database.query("SELECT ...")` inside
+                // `OnAppear async` has no row type at all, because only
+                // declaration initializers carried an expected type.
+                inspect_expression_calls_with_expected(
+                    value,
+                    environment,
+                    environment.get(name).cloned().as_ref(),
+                    inspect,
+                )?
+            }
+            ast::Stmt::Return { value, .. } => {
+                // A method that returns `Array<Note>` and writes
+                // `return await database.query(...)` carries its row type in
+                // the return type alone, so it has to reach the call.
+                // The enclosing function's declared return type is what tells a
+                // typed query its row type in `return await
+                // database.query(...)`. It travels in the environment because
+                // that is already threaded through every nested block, so a
+                // `return` inside an `if` or a loop sees the function's type too.
+                let declared = environment.get(RETURN_TYPE_KEY).cloned();
+                inspect_expression_calls_with_expected(
+                    value,
+                    environment,
+                    declared.as_ref(),
+                    inspect,
+                )?
             }
             ast::Stmt::NativePropertyAssign {
                 receiver, value, ..
@@ -2046,23 +2334,42 @@ fn inspect_expression_calls_with_expected(
             inspect_expression_calls(b, environment, inspect)?;
             inspect_expression_calls(c, environment, inspect)?;
         }
-        E::Call(_, _, args, _) => {
-            for arg in args {
-                inspect_expression_calls(arg, environment, inspect)?;
+        E::Call(name, _, args, _) => {
+            let inner = result_value_type(name, expected_type);
+            for (index, arg) in args.iter().enumerate() {
+                inspect_expression_calls_with_expected(
+                    arg,
+                    environment,
+                    if index == 0 { inner.as_ref() } else { None },
+                    inspect,
+                )?;
             }
         }
-        E::CallNamed { arguments, .. } => {
+        E::CallNamed { name, arguments, .. } => {
+            let inner = result_value_type(name, expected_type);
             for arg in arguments.values() {
-                inspect_expression_calls(arg, environment, inspect)?;
+                inspect_expression_calls_with_expected(
+                    arg,
+                    environment,
+                    inner.as_ref(),
+                    inspect,
+                )?;
             }
         }
         E::QualifiedCall {
+            name,
             arguments,
             named_arguments,
             ..
         } => {
-            for arg in arguments {
-                inspect_expression_calls(arg, environment, inspect)?;
+            let inner = result_value_type(name, expected_type);
+            for (index, arg) in arguments.iter().enumerate() {
+                inspect_expression_calls_with_expected(
+                    arg,
+                    environment,
+                    if index == 0 { inner.as_ref() } else { None },
+                    inspect,
+                )?;
             }
             for arg in named_arguments.values() {
                 inspect_expression_calls(arg, environment, inspect)?;
@@ -2131,30 +2438,102 @@ fn inspect_expression_calls_with_expected(
     Ok(())
 }
 
-fn resolve_static_database_handles(
-    app: &ast::App,
-    namespace: &str,
-) -> Result<HashMap<String, (String, bool)>, CompileError> {
-    let mut bindings = Vec::<(String, &ast::Expr)>::new();
+/// Every immutable binding a static initializer may refer to, by name.
+///
+/// Both module scope and app scope must be included. The parser files a
+/// top-level `let` into `App::globals`, but a `let` written inside `app { ... }`
+/// — the documented way to declare app-wide state — lands in `App::states`.
+/// Scanning only `globals` meant that every real application, which opens its
+/// database inside the app block, produced an empty handle map: no database was
+/// discovered, so no query, write, or migration was ever validated.
+fn static_bindings(app: &ast::App) -> Vec<(String, &ast::Expr)> {
+    let mut bindings = Vec::new();
     for global in &app.globals {
         bindings.push((global.name.clone(), &global.initial));
+    }
+    for state in &app.states {
+        bindings.push((state.name.clone(), &state.initial));
+    }
+    // Components and screens own their own scope, and a feature component that
+    // opens its own database is the ordinary shape: the compiler rejects
+    // passing a native class instance into a component that also disposes it,
+    // so an app-level handle cannot simply be handed down.
+    for screen in &app.screens {
+        for state in &screen.states {
+            bindings.push((state.name.clone(), &state.initial));
+        }
+    }
+    for component in &app.components {
+        for state in &component.states {
+            bindings.push((state.name.clone(), &state.initial));
+        }
     }
     for class in &app.classes {
         for field in &class.static_fields {
             bindings.push((format!("{}.{}", class.name, field.name), &field.initial));
         }
+        // An instance method refers to its own field by bare name, so the field
+        // is also offered unbound. A class that owns the connection is the
+        // ordinary way to write an application -- one `DatabaseHelper` holding
+        // the handle and the operations -- and without this the analyzer saw no
+        // database at all in that shape. `resolve_static_database_handles` drops
+        // a bare name that two classes bind to *different* databases, so
+        // offering them all cannot attribute one class's SQL to another's.
+        for field in &class.fields {
+            bindings.push((field.name.clone(), &field.initial));
+        }
+        for field in &class.static_fields {
+            bindings.push((field.name.clone(), &field.initial));
+        }
     }
-    let mut resolved = HashMap::with_capacity(bindings.len());
+    bindings
+}
+
+fn resolve_static_database_handles(
+    app: &ast::App,
+    namespace: &str,
+) -> Result<HashMap<String, (String, bool)>, CompileError> {
+    let mut bindings = Vec::<(String, &ast::Expr)>::new();
+    for (name, initial) in static_bindings(app) {
+        bindings.push((name, initial));
+    }
+    let mut resolved: HashMap<String, (String, bool)> = HashMap::with_capacity(bindings.len());
+    let mut conflicting: HashSet<String> = HashSet::new();
     for _ in 0..=bindings.len() {
         let mut changed = false;
         for (name, value) in &bindings {
-            if resolved.contains_key(name) {
+            // A name that two scopes bind to *different* databases stays
+            // unresolved on purpose. Picking either one would attribute a
+            // component's SQL to the app's database, which is a wrong
+            // diagnostic; skipping it loses only that check. Component-local
+            // databases are the normal shape -- passing a native class instance
+            // into a component that also has lifecycle callbacks is rejected by
+            // the compiler -- so their queries must still be validated, but
+            // never against a same-named handle from another scope.
+            if resolved.contains_key(name) || conflicting.contains(name) {
                 continue;
             }
             let direct = sqlite_database_constructor(value, namespace)?;
             let alias =
                 expression_reference_name(value).and_then(|target| resolved.get(&target).cloned());
             if let Some(database) = direct.or(alias) {
+                let clash = bindings.iter().any(|(other, other_value)| {
+                    other == name && {
+                        sqlite_database_constructor(other_value, namespace)
+                            .ok()
+                            .flatten()
+                            .or_else(|| {
+                                expression_reference_name(other_value).and_then(|target| {
+                                    resolved.get(&target).cloned()
+                                })
+                            })
+                            .is_some_and(|candidate| candidate != database)
+                    }
+                });
+                if clash {
+                    conflicting.insert(name.clone());
+                    continue;
+                }
                 resolved.insert(name.clone(), database);
                 changed = true;
             }
@@ -2215,15 +2594,7 @@ fn resolve_static_migrations(
     app: &ast::App,
     namespace: &str,
 ) -> HashMap<String, Vec<DatabaseMigration>> {
-    let mut values = Vec::<(String, &ast::Expr)>::new();
-    for global in &app.globals {
-        values.push((global.name.clone(), &global.initial));
-    }
-    for class in &app.classes {
-        for field in &class.static_fields {
-            values.push((format!("{}.{}", class.name, field.name), &field.initial));
-        }
-    }
+    let values = static_bindings(app);
     let mut resolved = HashMap::new();
     for (name, value) in &values {
         if let Some(migrations) = parse_migrations(value, namespace) {
@@ -2396,34 +2767,67 @@ fn sanitize_database_name(name: &str) -> String {
         .collect()
 }
 
-fn static_parameter_types(
+/// Counts bind parameters in a source array without inferring their types.
+fn bind_parameter_count(expression: &ast::Expr) -> Result<usize, CompileError> {
+    match expression {
+        ast::Expr::Array(values, _) => Ok(values.len()),
+        _ => Err(CompileError::new(
+            expression.span(),
+            "statically checked SQLite parameters must use an array literal",
+        )),
+    }
+}
+
+/// The value type inside an expected `Result<V, E>`, for `Ok`/`Err` calls.
+///
+/// `return Ok(await database.query("...")?)` is the idiomatic shape for a
+/// fallible typed query, and the row type lives two wrappers down: the declared
+/// `Result<Array<Note>, Failure>` and the `Ok` that re-wraps it. Descending into
+/// `Ok` without peeling the result loses the row type and the analyzer then
+/// demands an explicit `query<Note>` that the author had no reason to write.
+fn result_value_type<'a>(
+    name: &str,
+    expected_type: Option<&'a TypeSyntax>,
+) -> Option<TypeSyntax> {
+    let function = name.rsplit('.').next()?;
+    if function != "Ok" && function != "Err" {
+        return None;
+    }
+    match expected_type? {
+        TypeSyntax::Generic(generic, arguments, _) if generic == "Result" => arguments.first().cloned(),
+        _ => None,
+    }
+}
+
+/// Environment key carrying the enclosing function's declared return type.
+///
+/// A leading NUL cannot appear in a `.nx` identifier, so it cannot shadow or be
+/// shadowed by a real binding name.
+const RETURN_TYPE_KEY: &str = "\u{0}return-type";
+
+fn lenient_parameter_types(
     expression: &ast::Expr,
     environment: &HashMap<String, TypeSyntax>,
     structs: &[StructDecl],
-) -> Result<Vec<nexa_syntax::ast::FunctionParameter>, CompileError> {
+) -> Result<Option<Vec<nexa_syntax::ast::FunctionParameter>>, CompileError> {
     let ast::Expr::Array(values, _) = expression else {
         return Err(CompileError::new(
             expression.span(),
             "statically checked SQLite parameters must use an array literal",
         ));
     };
-    values
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let ty = infer_static_type(value, environment, structs).ok_or_else(|| {
-                CompileError::new(
-                    value.span(),
-                    "cannot infer the SQLite parameter type; use a typed scalar value",
-                )
-            })?;
-            Ok(nexa_syntax::ast::FunctionParameter {
-                name: format!("p{index}"),
-                ty,
-                span: value.span(),
-            })
-        })
-        .collect()
+    let mut parameters = Vec::with_capacity(values.len());
+    for (index, value) in values.iter().enumerate() {
+        let Some(ty) = infer_static_type(value, environment, structs) else {
+            return Ok(None);
+        };
+        parameters.push(nexa_syntax::ast::FunctionParameter {
+            name: format!("p{index}"),
+            ty,
+            span: value.span(),
+        });
+    }
+    Ok(Some(parameters))
 }
 
 fn infer_static_type(

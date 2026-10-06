@@ -538,6 +538,314 @@ app TodoApp {
 }
 "#;
 
+    /// A database opened inside `app { ... }`, with its migration and its reads
+    /// in the body's `OnAppear async` block -- the shape every real application
+    /// uses.
+    ///
+    /// This fixture is the regression test for three separate holes, each of
+    /// which made the analyzer silently validate nothing at all:
+    ///
+    /// 1. handles were resolved only from `App::globals`, but a `let` written
+    ///    inside the app block lands in `App::states`, so no database was found;
+    /// 2. only declarations and function bodies were walked, so a `migrate` call
+    ///    inside `OnAppear async` was invisible and the schema never existed;
+    /// 3. assignment targets carried no expected type, so a typed query assigned
+    ///    to a declared `Array<Todo>` state had no row type to check against.
+    const APP_SCOPED: &str = r#"
+plugin "dev.nexa.sqlite" as SQLite
+struct Todo { id: Int64, title: String }
+app TodoApp {
+    let store = SQLite.Database("todos", false)
+    let migrations = [SQLite.Migration(1, ["CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"])]
+    state todos: Array<Todo> = []
+    body {
+        OnAppear async {
+            await store.migrate(migrations)
+            todos = await store.query("SELECT id, title FROM todos WHERE id = ?", [1])
+        }
+    }
+}
+"#;
+
+    fn error_messages(source: &str) -> Vec<String> {
+        analyze(&request(source, Vec::new()))
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect()
+    }
+
+    #[test]
+    fn accepts_an_app_scoped_database_whose_work_lives_in_on_appear() {
+        let messages = error_messages(APP_SCOPED);
+        assert!(
+            messages.is_empty(),
+            "expected no diagnostics, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_query_against_a_table_no_migration_creates() {
+        let source = APP_SCOPED.replace(
+            "SELECT id, title FROM todos WHERE id = ?",
+            "SELECT id, title FROM missing WHERE id = ?",
+        );
+        let messages = error_messages(&source);
+        assert!(
+            messages.iter().any(|message| message.contains("missing")),
+            "expected the unknown table to be rejected, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_write_statement_used_as_a_query() {
+        let source = APP_SCOPED.replace(
+            "todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])",
+            "todos = await store.query(\"DELETE FROM todos\", [])",
+        );
+        let messages = error_messages(&source);
+        assert!(
+            messages.iter().any(|message| message.contains("read-only")),
+            "expected a read-only diagnostic, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_query_whose_columns_do_not_match_the_row_struct() {
+        let source = APP_SCOPED.replace(
+            "SELECT id, title FROM todos WHERE id = ?",
+            "SELECT id FROM todos WHERE id = ?",
+        );
+        let messages = error_messages(&source);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("but `Todo` has 2 fields")),
+            "expected a column/field arity diagnostic, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_migrations_declared_out_of_order() {
+        let source = APP_SCOPED.replace("SQLite.Migration(1,", "SQLite.Migration(3,");
+        let messages = error_messages(&source);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("declared in order starting at 1")),
+            "expected a migration ordering diagnostic, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_mismatched_bind_arity_inside_an_action_block() {
+        let source = APP_SCOPED.replace(
+            "todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])",
+            "todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [])",
+        );
+        let messages = error_messages(&source);
+        assert!(
+            messages.iter().any(|message| message.contains("bind slot")),
+            "expected a bind arity diagnostic, got {messages:?}"
+        );
+    }
+
+    /// A parameter the analyzer cannot type -- read from a plugin contract struct
+    /// it never parses -- must degrade to an arity check rather than being
+    /// rejected. The analyzer guards SQL, not types, and refusing to check such an
+    /// application defeats the point.
+    #[test]
+    fn accepts_a_parameter_whose_type_is_outside_the_analyzer() {
+        let source = APP_SCOPED
+            .replace(
+                "    state todos: Array<Todo> = []",
+                "    state todos: Array<Todo> = []\n    state inserted = SQLite.Inserted(0)",
+            )
+            .replace(
+                "todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])",
+                "let written = await store.execute(\"INSERT INTO todos (id, title) VALUES (?, ?)\", [1, \"a\"])\n            todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [inserted.lastInsertRowId])",
+            );
+        let messages = error_messages(&source);
+        assert!(
+            messages.is_empty(),
+            "expected no diagnostics, got {messages:?}"
+        );
+    }
+
+    /// A component that owns the database itself, which is the shape a real app
+    /// uses for a feature screen. Custom components get their own `body`, so the
+    /// node walk has to reach them as well as the app body.
+    #[test]
+    fn validates_a_database_opened_inside_a_custom_component() {
+        let source = APP_SCOPED.replace(
+            "app TodoApp {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]",
+            "component TodoList() {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]\n    state todos: Array<Todo> = []\n    body {\n        Button(\"Load\") {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])\n        }\n    }\n}\napp TodoApp {",
+        )
+        .replace(
+            "    state todos: Array<Todo> = []\n    body {\n        OnAppear async {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])\n        }\n    }",
+            "    body {\n        TodoList()\n    }",
+        );
+        let messages = error_messages(&source);
+        assert!(
+            messages.is_empty(),
+            "expected no diagnostics for a component-owned database, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_bad_query_inside_a_custom_component() {
+        let source = APP_SCOPED
+            .replace(
+                "app TodoApp {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]",
+                "component TodoList() {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]\n    state todos: Array<Todo> = []\n    body {\n        Button(\"Load\") {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM missing WHERE id = ?\", [1])\n        }\n    }\n}\napp TodoApp {",
+            )
+            .replace(
+                "    state todos: Array<Todo> = []\n    body {\n        OnAppear async {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])\n        }\n    }",
+                "    body {\n        TodoList()\n    }",
+            );
+        let messages = error_messages(&source);
+        assert!(
+            messages.iter().any(|message| message.contains("missing")),
+            "expected the component's query to be rejected, got {messages:?}"
+        );
+    }
+
+    /// A named screen owns its own scope, exactly as a component does, and its
+    /// body carries the same kinds of calls.
+    #[test]
+    fn validates_a_database_opened_inside_a_named_screen() {
+        let source = APP_SCOPED.replace(
+            "app TodoApp {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]",
+            "screen TodoScreen {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]\n    state todos: Array<Todo> = []\n    body {\n        Button(\"Load\") {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])\n        }\n    }\n}\napp TodoApp {",
+        )
+        .replace(
+            "    state todos: Array<Todo> = []\n    body {\n        OnAppear async {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])\n        }\n    }",
+            "    body {\n        NavigationStack(root: TodoScreen)\n    }",
+        );
+        let messages = error_messages(&source);
+        assert!(
+            messages.is_empty(),
+            "expected no diagnostics for a screen-owned database, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_bad_query_inside_a_named_screen() {
+        let source = APP_SCOPED
+            .replace(
+                "app TodoApp {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]",
+                "screen TodoScreen {\n    let store = SQLite.Database(\"todos\", false)\n    let migrations = [SQLite.Migration(1, [\"CREATE TABLE todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL)\"])]\n    state todos: Array<Todo> = []\n    body {\n        Button(\"Load\") {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM gone WHERE id = ?\", [1])\n        }\n    }\n}\napp TodoApp {",
+            )
+            .replace(
+                "    state todos: Array<Todo> = []\n    body {\n        OnAppear async {\n            await store.migrate(migrations)\n            todos = await store.query(\"SELECT id, title FROM todos WHERE id = ?\", [1])\n        }\n    }",
+                "    body {\n        NavigationStack(root: TodoScreen)\n    }",
+            );
+        let messages = error_messages(&source);
+        assert!(
+            messages.iter().any(|message| message.contains("gone")),
+            "expected the screen's query to be rejected, got {messages:?}"
+        );
+    }
+
+    /// The shape a real application uses: one class owns the connection and the
+    /// operations, and the UI calls its methods.
+    ///
+    /// A class instance method refers to its own field by bare name, so a bare
+    /// `database` inside `fn` bodies must resolve to the class's handle. Class
+    /// instance fields were not scanned at all, which left every class-based
+    /// application unvalidated.
+    #[test]
+    fn validates_a_database_owned_by_a_class() {
+        let source = r#"
+plugin "dev.nexa.sqlite" as SQLite
+struct Note { id: Int64, title: String }
+class NoteStore {
+    let database = SQLite.Database("notes", false)
+    let migrations = [SQLite.Migration(1, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"])]
+
+    async fn prepare() -> Int32 {
+        return await database.migrate(migrations)
+    }
+
+    fn all() -> Signal<Array<Note>> {
+        return database.observeQuery<Note>("SELECT id, title FROM notes", [])
+    }
+}
+app NotesApp {
+    let store = NoteStore()
+    body { Text("notes") }
+}
+"#;
+        let messages = error_messages(source);
+        assert!(
+            messages.is_empty(),
+            "expected no diagnostics for a class-owned database, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_bad_query_inside_a_class_method() {
+        let source = r#"
+plugin "dev.nexa.sqlite" as SQLite
+struct Note { id: Int64, title: String }
+class NoteStore {
+    let database = SQLite.Database("notes", false)
+    let migrations = [SQLite.Migration(1, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"])]
+
+    async fn prepare() -> Int32 {
+        return await database.migrate(migrations)
+    }
+
+    fn all() -> Signal<Array<Note>> {
+        return database.observeQuery<Note>("SELECT id, title FROM nowhere", [])
+    }
+}
+app NotesApp {
+    let store = NoteStore()
+    body { Text("notes") }
+}
+"#;
+        let messages = error_messages(source);
+        assert!(
+            messages.iter().any(|message| message.contains("nowhere")),
+            "expected the class method's query to be rejected, got {messages:?}"
+        );
+    }
+
+    /// A class method that fills a declared field with a typed query relies on
+    /// the field's type reaching the method's environment; the query carries no
+    /// type argument of its own.
+    #[test]
+    fn uses_a_class_fields_declared_type_inside_its_methods() {
+        let source = r#"
+plugin "dev.nexa.sqlite" as SQLite
+struct Note { id: Int64, title: String }
+class NoteStore {
+    let database = SQLite.Database("notes", false)
+    let migrations = [SQLite.Migration(1, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"])]
+    let notes: Array<Note> = []
+
+    async fn reload() -> Void {
+        await database.migrate(migrations)
+        notes = await database.query("SELECT id FROM notes", [])
+    }
+}
+app NotesApp {
+    let store = NoteStore()
+    body { Text("notes") }
+}
+"#;
+        // `notes` has two fields and the query projects one, so the column/field
+        // arity check is reachable only when the declared type was available.
+        let messages = error_messages(source);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("but `Note` has 2 fields")),
+            "expected the field's declared type to reach the method, got {messages:?}"
+        );
+    }
+
     #[test]
     fn validates_ordinary_database_handle_migration_and_typed_query() {
         let source = BASE.replace(

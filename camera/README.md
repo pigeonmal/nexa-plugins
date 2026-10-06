@@ -1,44 +1,61 @@
-# `@nexa/camera`
+# `dev.nexa.camera`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-AVFoundation%20%2F%20CameraX-orange.svg)](https://developer.apple.com/av-foundation/)
 
-Native camera preview, photo capture, video recording, real-time barcode scanning, and zero-copy raw I420 frame streaming.
+Native camera preview, photo capture, video recording, real-time barcode scanning, and throttled raw I420 frame events.
 
 Backed by Apple `AVFoundation` + `Vision` on iOS and AndroidX `CameraX` + `ML Kit` on Android.
 
 ---
 
+> **Android minimum API:** 23. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.camera" as Camera
+plugin "plugins/camera" as Camera
 
-component BarcodeScannerScreen() {
-    state scannedCode: String = ""
-    state isScanning: Bool = true
-    state facing: Camera.CameraFacing = Camera.CameraFacing.back
+app CameraDemo {
+    state photoRequestId: Int32 = 0
+    state recording = false
+    state imageStreamEnabled = false
+    state photoUri = ""
+    state videoUri = ""
+    state barcodeValue = ""
+    state frameSequence: Int64 = 0
+    state cameraFailure = ""
 
-    VStack {
-        if isScanning {
+    body {
+        Column(spacing: 12, padding: 16) {
             Camera.CameraView(
-                facing: facing,
+                facing: Camera.CameraFacing.back,
+                photoRequestId: photoRequestId,
+                recording: recording,
+                imageStreamEnabled: imageStreamEnabled,
                 barcodeScanningEnabled: true,
                 barcodeFormat: Camera.CameraBarcodeFormat.qr,
-                onBarcodeDetected: (barcode) => {
-                    scannedCode = barcode.value
-                    isScanning = false
-                },
-                onFailed: (err) => {
-                    print("Camera error: \(err)")
-                }
+                frameResolution: Camera.CameraFrameResolution.vga,
+                maxFramesPerSecond: 10,
             )
-        } else {
-            VStack(spacing: 16) {
-                Text("Scanned QR Code:", size: 14)
-                Text(scannedCode, size: 18, weight: "bold")
-                Button("Scan Again", action: () => { isScanning = true })
+                .onPhotoCaptured { uri -> photoUri = uri }
+                .onVideoCaptured { uri -> videoUri = uri }
+                .onBarcodeDetected { barcode -> barcodeValue = barcode.value }
+                .onFrameAvailable { frame -> frameSequence = frame.sequence }
+                .onFailed { error -> cameraFailure = "Camera operation failed" }
+
+            Button("Take photo") { photoRequestId += 1 }
+            Button("Toggle video recording") {
+                recording = !recording
             }
+            Button("Toggle image stream") {
+                imageStreamEnabled = !imageStreamEnabled
+            }
+            Text(photoUri)
+            Text(videoUri)
+            Text(barcodeValue)
+            Text("Frame: \(frameSequence)")
+            Text(cameraFailure)
         }
     }
 }
@@ -48,13 +65,10 @@ component BarcodeScannerScreen() {
 
 ## 2. API Reference
 
-### `CameraView` Native Component
+### `CameraView` component
 
 Declarative native camera surface. Leaving composition automatically releases camera hardware sessions and halts recordings.
 
-```nexa
-native component CameraView
-```
 
 #### Properties
 
@@ -85,15 +99,36 @@ native component CameraView
 ### Data Structures & Enums
 
 #### `CameraFacing`
-- `back`: Standard rear camera lens.
-- `front`: Selfie camera lens (mirrored preview).
+
+| Case | Description |
+|---|---|
+| `back` | Standard rear camera lens. |
+| `front` | Selfie camera lens; the preview is mirrored. |
 
 #### `CameraBarcodeFormat`
-Supported symbologies: `aztec`, `codabar`, `code39`, `code93`, `code128`, `dataMatrix`, `ean8`, `ean13`, `itf`, `pdf417`, `qr`, `upcA`, `upcE`.
+
+| Case | Barcode format |
+|---|---|
+| `aztec` | Aztec |
+| `codabar` | Codabar |
+| `code39` | Code 39 |
+| `code93` | Code 93 |
+| `code128` | Code 128 |
+| `dataMatrix` | Data Matrix |
+| `ean8` | EAN-8 |
+| `ean13` | EAN-13 |
+| `itf` | Interleaved 2 of 5 |
+| `pdf417` | PDF417 |
+| `qr` | QR Code |
+| `upcA` | UPC-A |
+| `upcE` | UPC-E |
 
 #### `CameraFrameResolution`
-- `vga`: 640x480 resolution (optimized for computer vision / ML inference).
-- `hd`: 1280x720 high definition resolution.
+
+| Case | Resolution | Notes |
+|---|---:|---|
+| `vga` | 640 × 480 | Lower-bandwidth frame stream. |
+| `hd` | 1280 × 720 | Higher-detail frame stream. |
 
 #### `CameraBarcode`
 | Field | Type | Description |
@@ -102,7 +137,7 @@ Supported symbologies: `aztec`, `codabar`, `code39`, `code93`, `code128`, `dataM
 | `format` | `CameraBarcodeFormat` | Symbology of the detected code |
 
 #### `CameraFrame`
-Tightly packed raw I420 planar buffer (`Y`, `U`, `V`).
+Tightly packed raw I420 planar buffer (`Y`, `U`, `V`). The native capture frame is released when its callback returns; process each event promptly.
 | Field | Type | Description |
 |---|---|---|
 | `sequence` | `Int64` | Monotonically increasing frame counter |

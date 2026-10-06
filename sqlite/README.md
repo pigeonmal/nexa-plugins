@@ -1,66 +1,74 @@
-# `@nexa/sqlite`
+# `dev.nexa.sqlite`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-SQLite3-brightgreen.svg)](https://sqlite.org)
 
-App-private, high-performance SQLite database engine backed directly by native platform SQLite libraries (`libsqlite3.dylib` on iOS, Android framework SQLite/NDK on Android).
+App-private SQLite database engine backed by native platform SQLite libraries on iOS and Android.
 
-Supports typed struct mapping (`<T: Row>`), zero-copy decoding on background threads, reactive signals (`observeQuery`), schema migrations, and cross-process invalidation with iOS WidgetKit and Android Glance widgets.
+Supports typed struct queries, reactive signals (`observeQuery`), schema migrations, and invalidation for app and widget consumers. Database operations run asynchronously away from the UI executor.
 
 ---
+
+> **Android minimum API:** 23. Set `android.minSdk` to at least this value in `nexa.config.nx`.
 
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.sqlite" as SQLite
+plugin "plugins/sqlite" as SQLite
 
-struct TaskItem {
-    id: Int64?,
+struct TaskRow {
+    id: Int64,
     title: String,
-    completed: Bool,
-    priority: Int32
+    isCompleted: Bool
 }
 
-component TaskScreen() {
-    let db = SQLite.Database("tasks_app", sharedWithWidgets: true)
-    state tasks: Signal<Array<TaskItem>> = db.observeQuery<TaskItem>(
-        "SELECT id, title, completed, priority FROM tasks ORDER BY priority DESC",
+app SharedTaskList {
+    let database = SQLite.Database("reading_tasks", false)
+    state setupTask: TaskHandle? = null
+    state writeTask: TaskHandle? = null
+    state status: String = "Preparing task list"
+    state tasks: Signal<Array<TaskRow>> = database.observeQuery<TaskRow>(
+        "SELECT id, title, is_completed AS isCompleted FROM tasks ORDER BY id DESC",
         []
     )
 
-    onAppear(() => {
-        setupSchema()
-    })
-
-    fn setupSchema() {
-        try {
-            await db.migrate([
-                SQLite.Migration(version: 1, statements: [
-                    "CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0, priority INTEGER NOT NULL DEFAULT 1);"
-                ])
-            ])
-        } catch SQLite.Failure as err {
-            print("Migration failed: \(err)")
+    body {
+        OnAppear {
+            Task.launch(handle: setupTask, executor: TaskExecutor.Main) {
+                try {
+                    await database.migrate([
+                        SQLite.Migration(1, [
+                            "CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'Normal', is_completed INTEGER NOT NULL DEFAULT 0)"
+                        ])
+                    ])
+                    status = "Task list ready"
+                } catch {
+                    status = "Could not prepare the local database"
+                }
+            }
         }
-    }
-
-    fn addTask(title: String) {
-        try {
-            await db.execute(
-                "INSERT INTO tasks (title, completed, priority) VALUES (?, ?, ?)",
-                [title, false, 1]
-            )
-        } catch SQLite.Failure as err {
-            print("Failed to add task: \(err)")
-        }
-    }
-
-    VStack(spacing: 12) {
-        FastList(tasks.value, id: "id") { task in
-            HStack {
-                Text(task.title, size: 16)
-                Spacer()
-                Text(task.completed ? "Done" : "Pending", color: task.completed ? "#34C759" : "#FF9500")
+        OnDisappear { database.dispose() }
+        Column(spacing: 12, padding: 16) {
+            Text(status)
+            if tasks.value.isEmpty {
+                Text("No tasks yet. Add a task to get started.")
+            } else {
+                FastList(tasks.value, key: .id) { task, index in
+                    Text(task.title + (task.isCompleted ? " · Done" : " · Open"))
+                }
+            }
+            Button("Add a reading task") {
+                Task.launch(handle: writeTask, executor: TaskExecutor.Main) {
+                    try {
+                        await database.execute(
+                            "INSERT INTO tasks (title, priority, is_completed) VALUES (?, ?, ?)",
+                            ["Read the next chapter", "High", false]
+                        )
+                        status = "Task saved"
+                    } catch {
+                        status = "Could not save the task"
+                    }
+                }
             }
         }
     }
@@ -71,49 +79,61 @@ component TaskScreen() {
 
 ## 2. API Reference
 
-### `Database` Native Class
+### `Database` handle
 
-Long-lived SQLite connection manager. Queries and writes run asynchronously away from the main UI thread (dedicated serial `DispatchQueue` on iOS, `Dispatchers.IO` on Android).
+Create one handle for the database name your app uses. Set `sharedWithWidgets` to `true` when app and widget code must open the same database; iOS requires an App Group.
 
-```nexa
-native class Database {
-    init(name: String, sharedWithWidgets: Bool)
-}
-```
+| Constructor | Signature | Description |
+|---|---|---|
+| `Database` | `Database(name: String, sharedWithWidgets: Bool)` | Opens or creates the named app-private database. |
+
 
 #### Methods
 
 | Method | Return Type | Description |
 |---|---|---|
-| `execute(sql: String, parameters: Array<Value>)` | `ExecutionResult` | Executes an `INSERT`, `UPDATE`, or `DELETE` statement. Emits automatic table invalidation. |
-| `executeTracked(sql: String, parameters: Array<Value>, changedTables: Array<String>)` | `ExecutionResult` | Executes SQL and explicitly invalidates only the specified observer tables. |
-| `executeRaw(sql: String, parameters: Array<Value>)` | `ExecutionResult` | Dynamic escape hatch for arbitrary SQL. Invalidates all subscriptions. |
-| `executeBatch(sql: String, rows: Array<Array<Value>>)` | `ExecutionResult` | Executes the statement once per row inside a single atomic transaction. |
-| `executeTransaction(statements: Array<Statement>)` | `Array<ExecutionResult>` | Runs multiple statements atomically inside a single `BEGIN ... COMMIT` block. |
-| `query<T: Row>(sql: String, parameters: Array<Value>)` | `Array<T>` | Compiles and runs a query, decoding columns directly into struct `T` on a worker thread. |
-| `observeQuery<T: Row>(sql: String, parameters: Array<Value>)` | `Signal<Array<T>>` | Returns a live reactive signal that auto-refreshes whenever matching tables are mutated. |
-| `queryRaw(sql: String, parameters: Array<Value>)` | `QueryResult` | Escape hatch returning dynamic raw column names and nested value matrices. |
-| `migrate(migrations: Array<Migration>)` | `Int32` | Runs pending sequential schema migrations and updates the `PRAGMA user_version`. |
-| `userVersion()` | `Int32` | Reads current `PRAGMA user_version`. |
+| `execute(sql: String, parameters: Array<Value>)` | `async -> ExecutionResult throws Failure` | Executes a write statement and conservatively invalidates query observers. |
+| `executeTracked(sql: String, parameters: Array<Value>, changedTables: Array<String>)` | `async -> ExecutionResult throws Failure` | Executes a write and notifies observers for the supplied changed table names. |
+| `executeRaw(sql: String, parameters: Array<Value>)` | `async -> ExecutionResult throws Failure` | Dynamic SQL escape hatch; conservatively invalidates observers. |
+| `executeBatch(sql: String, rows: Array<Array<Value>>)` | `async -> ExecutionResult throws Failure` | Executes the statement for each parameter row in one transaction. |
+| `executeTransaction(statements: Array<Statement>)` | `async -> Array<ExecutionResult> throws Failure` | Runs the statements atomically. A failing statement rolls back the transaction. |
+| `query<T: Row>(sql: String, parameters: Array<Value>)` | `async -> Array<T> throws Failure` | Maps selected columns into the declared struct type on the database worker. Declares `rowFailure queryFailed`, so the row mapper can surface `queryFailed` in addition to statement failures. |
+| `observeQuery<T: Row>(sql: String, parameters: Array<Value>)` | `Signal<Array<T>>` | Creates a signal that refreshes when a committed write may affect tables read by the query. Read its current value with `.value`. Also declares `rowFailure queryFailed`, so refreshing can surface `queryFailed`. |
+| `queryRaw(sql: String, parameters: Array<Value>)` | `async -> QueryResult throws Failure` | Returns column names and rows whose cells use the typed `Value` enum. |
+| `migrate(migrations: Array<Migration>)` | `async -> Int32 throws Failure` | Runs sequential pending migrations and returns the applied schema version. |
+| `userVersion()` | `async -> Int32 throws Failure` | Reads SQLite `PRAGMA user_version`. |
 | `observe()` | `InvalidationSubscription` | Creates a subscription notified on any write to the database. |
 | `observeTables(tables: Array<String>)` | `InvalidationSubscription` | Creates a subscription notified only when listed tables are modified. |
 | `attach(subscription: InvalidationSubscription)` | `Void` | Attaches a reusable subscription to observe all tables. |
 | `attachTables(subscription: InvalidationSubscription, tables: Array<String>)` | `Void` | Attaches a subscription with specific table filters. |
-| `dispose()` | `Void` | Closes the database connection and frees native resources. |
+| `dispose()` | `Void` | Closes the connection and releases its native handle. |
 
 ---
 
-### `InvalidationSubscription` Native Class
+### `InvalidationSubscription`
 
-Lifecycle-managed observer for fine-grained database mutations.
+Lifecycle-owned write observer. Attach it when the consumer becomes active and dispose it when that consumer leaves.
 
-```nexa
-native class InvalidationSubscription {
-    init()
-    event invalidated()
-    fn dispose()
-}
-```
+| Member | Signature | Description |
+|---|---|---|
+| Constructor | `InvalidationSubscription()` | Creates a detached subscription. |
+| Event | `invalidated()` | Fires after a matching committed write. |
+| Method | `dispose()` | Releases the subscription and removes its handlers. |
+
+### SQL parameter values
+
+App code normally passes typed Nexa values directly in `parameters`. `queryRaw` returns cells as `SQLite.Value` cases.
+
+| Case | Payload | SQLite value |
+|---|---|---|
+| `nullValue` | — | SQL `NULL` |
+| `boolean(value: Bool)` | `Bool` | Integer boolean |
+| `int32(value: Int32)` | `Int32` | 32-bit integer |
+| `int64(value: Int64)` | `Int64` | 64-bit integer |
+| `float64(value: Float64)` | `Float64` | Floating-point number |
+| `text(value: String)` | `String` | Text |
+| `blob(value: Bytes)` | `Bytes` | Blob |
+
 
 ---
 
@@ -173,3 +193,23 @@ All throwing methods throw `SQLite.Failure`:
 | **Widget Sharing** | Shared between main app and iOS WidgetKit extensions | Shared between main app and Jetpack Glance receivers |
 | **Refresh Trigger** | Coalesced `WidgetCenter.shared.reloadAllTimelines()` | Explicit broadcast to registered `AppWidgetProvider` |
 | **Concurrency** | SQLite WAL (Write-Ahead Logging) mode enabled | SQLite WAL mode enabled |
+
+For an iOS app and WidgetKit extension to open the same database, set the App Group identifier in the app configuration and construct both handles with the same database name and `sharedWithWidgets: true`:
+
+```nx
+config {
+    app { displayName: "Reading Tasks", version: "1.0.0", buildNumber: 1 }
+    ios {
+        minVersion: "16.0",
+        bundleIdentifier: "dev.example.reading",
+        appGroupIdentifier: "group.dev.example.reading"
+    }
+    android {
+        minSdk: 23,
+        targetSdk: 36,
+        applicationId: "dev.example.reading"
+    }
+}
+```
+
+Add `appGroupIdentifier` to the existing `ios` block; Nexa applies the matching entitlement to the app and widget extension. Android widgets use the app's private database directory and need no App Group configuration.

@@ -1,4 +1,4 @@
-# `@nexa/video-player`
+# `dev.nexa.video-player`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-AVPlayer%20%2F%20Media3%20(ExoPlayer)-red.svg)](https://developer.apple.com/documentation/avfoundation/avplayer)
@@ -9,34 +9,109 @@ Backed by Apple `AVPlayer` + `AVPlayerLayer` on iOS and AndroidX `Media3` (ExoPl
 
 ---
 
+> **Android minimum API:** 23. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.video-player" as Video
+plugin "plugins/video-player" as VideoPlayer
 
-component FeedVideoPlayer(videoUrl: String) {
-    let player = Video.VideoPlayer()
+component PlayerSurface(player: VideoPlayer.VideoPlayer, title: String) {
+    body {
+        PlayerMedia(player: player, title: title)
+    }
+}
 
-    onAppear(() => {
-        try {
-            await player.prepare(videoUrl)
-            player.looping = true
-            player.play()
-        } catch Video.PlayerError as err {
-            print("Video error: \(err)")
+component PlayerMedia(player: VideoPlayer.VideoPlayer, title: String) {
+    state tapped = false
+
+    body {
+        Pressable() {
+            VideoPlayer.VideoView(player: player) {
+                Column {
+                    Text(title)
+                    if tapped {
+                        Text("Tapped")
+                    }
+                }
+            }
+        }.onTap {
+            tapped = true
         }
-    })
+    }
+}
 
-    onDisappear(() => {
-        player.dispose()
-    })
+app VideoPlayerDemo {
+    let player1 = VideoPlayer()
+    let player2 = VideoPlayer()
+    state loadFailed = false
+    state loadError = ""
+    state firstEnded = false
+    state secondEnded = false
+    state secondTapped = false
 
-    VStack {
-        Video.VideoView(
-            player: player,
-            controls: true,
-            softwareDecodingEnabled: true
-        )
+    body {
+        OnAppear async {
+            player1.ended { firstEnded = true }
+            player2.ended { secondEnded = true }
+            try {
+                await player1.prepare("https://media.w3.org/2010/05/sintel/trailer.mp4")
+                player1.play()
+                await player2.prepare("https://media.w3.org/2010/05/sintel/trailer.mp4")
+            } catch {
+                case VideoPlayer.PlayerError.invalidUrl {
+                    loadFailed = true
+                }
+                case VideoPlayer.PlayerError.decodingFailed(message) {
+                    loadFailed = true
+                    loadError = message
+                }
+            }
+        }
+        OnDisappear {
+            player1.dispose()
+            player2.dispose()
+        }
+        Column {
+            PlayerSurface(player: player1, title: "First player")
+            Pressable() {
+                VideoPlayer.VideoView(player: player2, controls: false, softwareDecodingEnabled: false) {
+                    Text("Second player")
+                }
+            }.onTap {
+                secondTapped = true
+            }
+            Button("Play first player") {
+                player1.play()
+            }
+            Button("Pause first player") {
+                player1.pause()
+            }
+            Button("Play second player") {
+                player2.play()
+            }
+            Button("Pause second player") {
+                player2.pause()
+            }
+            Button("Set first volume") {
+                player1.volume = 0.5
+            }
+            Button("Set second volume") {
+                player2.volume = 0.25
+            }
+            if loadFailed {
+                Text(loadError)
+            }
+            if firstEnded {
+                Text("First player ended")
+            }
+            if secondEnded {
+                Text("Second player ended")
+            }
+            if secondTapped {
+                Text("Second view tapped")
+            }
+        }
     }
 }
 ```
@@ -45,15 +120,14 @@ component FeedVideoPlayer(videoUrl: String) {
 
 ## 2. API Reference
 
-### `VideoPlayer` Native Class
+### `VideoPlayer` handle
 
-Controls media decoding, playback state, and forward preloading queues.
+Controls media decoding, playback state, and forward preloading queues; call `dispose()` when the app no longer uses the player.
 
-```nexa
-native class VideoPlayer {
-    init()
-}
-```
+| Constructor | Signature | Description |
+|---|---|---|
+| `VideoPlayer` | `VideoPlayer()` | Creates a video player handle. |
+
 
 #### Properties
 
@@ -68,7 +142,7 @@ native class VideoPlayer {
 
 | Method | Return Type | Description |
 |---|---|---|
-| `prepare(url: String)` | `Void` | Initializes video pipeline with target URL or local file path |
+| `prepare(url: String)` | `async -> Void throws PlayerError` | Initializes the video pipeline from a URL or local file path. |
 | `preload(url: String, index: Int32)` | `Void` | Buffers subsequent video into forward cache queue at specific index |
 | `setPreloadPosition(index: Int32)` | `Void` | Advances active playback queue to preloaded index |
 | `play()` | `Void` | Starts or resumes video rendering |
@@ -84,13 +158,10 @@ native class VideoPlayer {
 
 ---
 
-### `VideoView` Native Component
+### `VideoView` component
 
 Visual display surface hosting the native video render layer.
 
-```nexa
-native component VideoView
-```
 
 #### Properties
 
@@ -105,13 +176,16 @@ native component VideoView
 ### Data Structures & Enums
 
 #### `PlayerState`
-- `idle`: Uninitialized player.
-- `preparing`: Buffering video manifest and initial frames.
-- `ready`: Ready for smooth playback.
-- `playing`: Actively decoding and displaying video.
-- `paused`: Suspended.
-- `ended`: Completed playback.
-- `failed`: Decoding or network failure.
+
+| Case | Description |
+|---|---|
+| `idle` | Player has no prepared media. |
+| `preparing` | Loading the video and initial frames. |
+| `ready` | Ready for playback. |
+| `playing` | Actively rendering video. |
+| `paused` | Playback is suspended. |
+| `ended` | Playback reached the end. |
+| `failed` | A playback or decoding failure occurred. |
 
 #### `PlayerOptions`
 | Field | Type | Default | Description |
@@ -125,5 +199,5 @@ native component VideoView
 
 | Variant | Description |
 |---|---|
-| `invalidUrl` | Malformed or unreachable URL |
-| `decodingFailed(message: String)` | Unsupported video format, DRM failure, or hardware codec crash |
+| `invalidUrl` | URL is malformed or does not use HTTP or HTTPS. |
+| `decodingFailed(message: String)` | Loading or decoding failed; the message contains platform details. |

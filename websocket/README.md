@@ -1,4 +1,4 @@
-# `@nexa/websocket`
+# `dev.nexa.websocket`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-URLSession%20%2F%20OkHttp-blue.svg)](https://developer.apple.com/documentation/foundation/urlsessionwebsockettask)
@@ -9,55 +9,45 @@ Backed by Apple `URLSessionWebSocketTask` on iOS and Square `OkHttp` on Android.
 
 ---
 
+> **Android minimum API:** 21. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.websocket" as Net
+plugin "plugins/websocket" as WebSocket
 
-component LiveChatScreen() {
-    let socket = Net.WebSocket("wss://chat.example.com/live")
-    state messages: Array<String> = []
-    state inputMessage: String = ""
+app EchoChat {
+    let socket = WebSocket.WebSocket("wss://echo.websocket.events")
+    state message: String = "Hello from Nexa"
+    state received: String = ""
+    state status: String = "Connecting"
+    state connectTask: TaskHandle? = null
 
-    onAppear(() => {
-        setupSocket()
-    })
-
-    onDisappear(() => {
-        socket.close()
-        socket.dispose()
-    })
-
-    fn setupSocket() {
-        socket.onMessageReceived((text) => {
-            messages = [...messages, text]
-        })
-
-        socket.onStateChanged((state) => {
-            print("Socket state: \(state)")
-        })
-
-        try {
-            await socket.connect()
-        } catch Net.WebSocketError as err {
-            print("Connection error: \(err)")
+    body {
+        OnAppear {
+            socket.messageReceived { text -> received = text }
+            socket.stateChanged { current -> status = "Connection state changed" }
+            Task.launch(handle: connectTask, executor: TaskExecutor.Main) {
+                try {
+                    await socket.connect()
+                    status = "Connected"
+                } catch {
+                    status = "Could not connect to the echo service"
+                }
+            }
         }
-    }
-
-    fn sendMessage() {
-        if inputMessage != "" {
-            socket.send(inputMessage)
-            inputMessage = ""
-        }
-    }
-
-    VStack(spacing: 12) {
-        FastList(messages) { msg in
-            Text(msg, size: 14)
-        }
-        HStack {
-            TextInput("Type message...", text: inputMessage)
-            Button("Send", action: () => { sendMessage() })
+        OnDisappear { socket.dispose() }
+        Column(spacing: 12) {
+            Text(status)
+            Text("Last reply: " + received)
+            Button("Send message") {
+                let queued = socket.send(message)
+                if queued {
+                    status = "Message queued for sending"
+                } else {
+                    status = "Not connected"
+                }
+            }
         }
     }
 }
@@ -67,13 +57,14 @@ component LiveChatScreen() {
 
 ## 2. API Reference
 
-### `WebSocket` Native Class
+### `WebSocket` handle
 
-```nexa
-native class WebSocket {
-    init(url: String)
-}
-```
+The asynchronous `connect()` call begins the connection attempt; connection state and transport failures arrive through events. Dispose the handle when the owning screen or service ends.
+
+| Constructor | Signature | Description |
+|---|---|---|
+| `WebSocket` | `WebSocket(url: String)` | Creates a socket handle for the supplied `ws://` or `wss://` URL. |
+
 
 #### Properties
 
@@ -85,9 +76,9 @@ native class WebSocket {
 
 | Method | Return Type | Description |
 |---|---|---|
-| `connect()` | `Void` | Initiates WebSocket HTTP upgrade handshake. Throws on invalid scheme. |
-| `send(text: String)` | `Bool` | Queues UTF-8 text frame into native socket buffer. Returns `true` if accepted by queue. |
-| `sendBytes(bytes: Bytes)` | `Bool` | Queues binary frame into native socket buffer. |
+| `connect()` | `async -> Void throws WebSocketError` | Starts the WebSocket handshake; throws `invalidUrl` for an unsupported or malformed URL and `alreadyConnected` when a connection is already active. |
+| `send(text: String)` | `Bool` | Queues a UTF-8 text frame. `true` means the local queue accepted it, not that the peer received it. |
+| `sendBytes(bytes: Bytes)` | `Bool` | Queues a binary frame. `true` means the local queue accepted it, not that the peer received it. |
 | `close()` | `Void` | Performs normal RFC 6455 close handshake (Code 1000). |
 | `dispose()` | `Void` | Forcibly terminates socket task, closes network sockets, and unregisters listeners. |
 
@@ -105,12 +96,15 @@ native class WebSocket {
 ### Data Structures & Enums
 
 #### `WebSocketState`
-- `idle`: Socket instantiated but `connect()` has not been called.
-- `connecting`: TCP handshake and HTTP upgrade in progress.
-- `open`: Two-way bidirectional communication active.
-- `closing`: Close frame sent or received; socket awaiting teardown.
-- `closed`: Socket cleanly disconnected.
-- `failed`: Terminal network or protocol error.
+
+| Case | Description |
+|---|---|
+| `idle` | Socket was created, but `connect()` has not been called. |
+| `connecting` | TCP connection and WebSocket upgrade are in progress. |
+| `open` | Bidirectional communication is active. |
+| `closing` | A close frame was sent or received; teardown is pending. |
+| `closed` | Socket disconnected cleanly. |
+| `failed` | A transport or protocol failure occurred. |
 
 ---
 

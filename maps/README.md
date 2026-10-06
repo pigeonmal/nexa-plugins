@@ -1,4 +1,4 @@
-# `@nexa/maps`
+# `dev.nexa.maps`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-MapKit%20%2F%20Google%20Maps-brightgreen.svg)](https://developer.apple.com/documentation/mapkit)
@@ -9,34 +9,42 @@ Backed by Apple `MapKit` (`MKMapView`) on iOS and Google Play Services Maps (`Ma
 
 ---
 
+> **Android minimum API:** 23. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.maps" as Maps
+plugin "plugins/maps" as Maps
 
-component StoreLocatorScreen() {
-    state selectedStoreId: String? = null
-    state storePins: Array<Maps.MapPin> = [
-        Maps.MapPin(id: "store_1", title: "Downtown Flagship", latitude: 37.7749, longitude: -122.4194),
-        Maps.MapPin(id: "store_2", title: "Mission Branch", latitude: 37.7599, longitude: -122.4148)
-    ]
+app MapsConformance {
+    state selectedPin: String = ""
 
-    VStack {
-        Maps.MapView(
-            centerLatitude: 37.7749,
-            centerLongitude: -122.4194,
-            zoom: 13.0,
-            pins: storePins,
-            onPinSelected: (id) => {
-                selectedStoreId = id
+    body {
+        Stack(alignment: Center, background: "#111111") {
+            Maps.MapView(
+                centerLatitude: 48.8584,
+                centerLongitude: 2.2945,
+                pins: [
+                    Maps.MapPin("eiffel", "Eiffel Tower", 48.8584, 2.2945),
+                    Maps.MapPin("louvre", "The Louvre", 48.8606, 2.3376),
+                    Maps.MapPin("notre-dame", "Notre-Dame", 48.8530, 2.3499),
+                ],
+            ).onPinSelected { id ->
+                selectedPin = id
+                Log.info(message: "MAP_PIN_SELECTED:\(id)")
             }
-        )
 
-        if let id = selectedStoreId {
-            HStack {
-                Text("Selected Location: \(id)", weight: "bold")
+            Column(spacing: 4, padding: 16) {
+                Spacer()
+                Row(padding: 10, background: "#CC111111") {
+                    Text(
+                        if selectedPin == "" { "Tap a map pin" } else { "Selected \(selectedPin)" },
+                        color: "#FFFFFF",
+                        fontSize: 16,
+                        fontWeight: Semibold,
+                    )
+                }
             }
-            .padding(16)
         }
     }
 }
@@ -46,51 +54,38 @@ component StoreLocatorScreen() {
 
 ## 2. API Reference
 
-### `MapView` Native Component
+### `MapView` component
 
-```nexa
-native component MapView
-```
+The center coordinates and pins are required. `zoom` defaults to `12.0`.
 
 #### Properties
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `centerLatitude` | `Float64` | — | Initial coordinate latitude center in degrees |
-| `centerLongitude` | `Float64` | — | Initial coordinate longitude center in degrees |
-| `zoom` | `Float64` | `12.0` | Camera zoom level (`1.0` is entire globe, `20.0` is street level) |
-| `pins` | `Array<MapPin>` | `[]` | List of typed point annotations placed on the map |
+| `centerLatitude` | `Float64` | required | Center latitude in degrees. |
+| `centerLongitude` | `Float64` | required | Center longitude in degrees. |
+| `zoom` | `Float64` | `12.0` | Initial camera zoom. |
+| `pins` | `Array<MapPin>` | required | Typed map pins to display. |
 
-#### Events
+#### Event
 
 | Event | Payload | Description |
 |---|---|---|
-| `pinSelected` | `id: String` | Fired when user taps any pin annotation marker |
+| `pinSelected` | `id: String` | Fires when the user selects a pin. |
 
----
+### `MapPin`
 
-### Data Structures
-
-#### `MapPin`
 | Field | Type | Description |
 |---|---|---|
-| `id` | `String` | Unique identifier for marker callback disambiguation |
-| `title` | `String` | Text callout label displayed above the marker pin |
-| `latitude` | `Float64` | Geographic latitude in degrees |
-| `longitude` | `Float64` | Geographic longitude in degrees |
+| `id` | `String` | Stable identifier returned by `pinSelected`. |
+| `title` | `String` | Pin title shown by the native map. |
+| `latitude` | `Float64` | Pin latitude in degrees. |
+| `longitude` | `Float64` | Pin longitude in degrees. |
 
----
+## 3. Android setup
 
-## 3. Platform Setup
+The package manifest reads the Android Maps key from the `NEXA_MAPS_API_KEY` environment variable. Set it in the build environment; the plugin adds it to Android application metadata. Keep the key restricted in Google Cloud Console.
 
-For Android builds, provide your Google Maps API key in your Android manifest or `nexa.config.nx`:
-
-```nexa
-app MyApp {
-    android: {
-        manifestPlaceholders: {
-            "googleMapsApiKey": "AIzaSy..."
-        }
-    }
-}
+```bash
+NEXA_MAPS_API_KEY="your-restricted-key" nexa build --android
 ```

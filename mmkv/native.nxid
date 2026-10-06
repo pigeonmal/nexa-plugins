@@ -98,9 +98,9 @@ native class MMKVStore {
     fn remove(key: String) -> Bool
     /// Removes every listed key, returning how many were present.
     fn removeMany(keys: Array<String>) -> Int32
-    /// Removes every key and keeps the mapped file at its current size.
+    /// Removes every key and shrinks the data file to its expected base capacity.
     fn clearAll() -> Bool
-    /// Removes every key and releases the mapped pages.
+    /// Removes every key while retaining the current file space for later writes.
     fn clearAllKeepingSpace() -> Bool
     /// Compacts the file, returning the space reclaimed in bytes.
     fn trim() -> Int64

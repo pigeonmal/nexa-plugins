@@ -1,4 +1,4 @@
-# `@nexa/webview`
+# `dev.nexa.webview`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Security Hardened](https://img.shields.io/badge/Security-Origin%20Allowlisted-brightgreen.svg)](https://developer.apple.com/documentation/webkit/wkwebview)
@@ -9,31 +9,41 @@ Backed by Apple `WebKit` (`WKWebView`) on iOS and AndroidX `WebView` on Android.
 
 ---
 
+> **Android minimum API:** 24. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.webview" as WebView
+plugin "plugins/webview" as WebView
 
-component TermsOfServiceScreen() {
-    state currentUrl: String = "https://example.com/terms"
-    state isLoading: Bool = true
+app WebViewDemo {
+    state outgoingMessage = "First Nexa message"
+    state incomingMessage = "No message received"
+    state currentUrl = ""
+    state failure = ""
 
-    VStack {
-        WebView.BrowserView(
-            url: currentUrl,
-            javaScriptEnabled: true,
-            allowedMessageOrigins: ["https://example.com"],
-            onNavigated: (url) => {
+    body {
+        Column {
+            WebView.BrowserView(
+                url: "https://example.com",
+                javaScriptEnabled: true,
+                allowedMessageOrigins: ["https://example.com"],
+                message: outgoingMessage,
+            ).onMessageReceived { value ->
+                incomingMessage = value
+            }.onNavigated { url ->
                 currentUrl = url
-                isLoading = false
-            },
-            onMessageReceived: (msg) => {
-                print("Message from web page: \(msg)")
-            },
-            onFailed: (err) => {
-                print("Failed to load webview: \(err)")
+            }.onFailed { message ->
+                failure = message
             }
-        )
+
+            Button("Send another message") {
+                outgoingMessage = "Second Nexa message"
+            }
+            Text(currentUrl)
+            Text(incomingMessage)
+            Text(failure)
+        }
     }
 }
 ```
@@ -42,38 +52,39 @@ component TermsOfServiceScreen() {
 
 ## 2. API Reference
 
-### `BrowserView` Native Component
+### `BrowserView` component
 
-```nexa
-native component BrowserView
-```
+The component loads the requested URL. JavaScript messaging is origin-scoped: only exact HTTPS origins in `allowedMessageOrigins` can use the bridge.
 
 #### Properties
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `url` | `String` | — | Target URL to load (must be HTTPS or local app asset) |
-| `javaScriptEnabled` | `Bool` | `false` | Security toggle. JavaScript is strictly disabled unless explicitly enabled. |
-| `allowedMessageOrigins` | `Array<String>` | `[]` | List of trusted HTTPS origins permitted to send postMessages to the host app |
-| `message` | `String?` | `null` | String payload dispatched to the web document via `window.postMessage` |
+| `url` | `String` | required | URL loaded by the native web view. |
+| `javaScriptEnabled` | `Bool` | `false` | Enables page JavaScript and the messaging bridge. |
+| `allowedMessageOrigins` | `Array<String>` | required | Exact HTTPS origins allowed to exchange messages. |
+| `message` | `String?` | required | Optional host-to-page message. A changed value dispatches a `nexa-message` event on an allowed origin. |
 
 #### Events
 
 | Event | Payload | Description |
 |---|---|---|
-| `messageReceived` | `message: String` | Fired when an allowed origin emits `window.webkit.messageHandlers.nexa.postMessage` or Android interface |
-| `navigated` | `url: String` | Fired when navigation finishes successfully |
-| `failed` | `message: String` | Fired on SSL errors, DNS resolution failures, or HTTP connection aborts |
+| `messageReceived` | `message: String` | Page message received from an allowlisted main-frame origin. |
+| `navigated` | `url: String` | Navigation completed successfully. |
+| `failed` | `message: String` | Navigation or bridge setup failed. |
 
----
+## 3. Bidirectional messaging
 
-## 3. Bidirectional Web-to-Native Messaging
-
-In your hosted HTML/JavaScript document:
+In the hosted page, send a string from an allowed HTTPS main-frame origin:
 
 ```javascript
-// Dispatches message to Nexa host app if origin is in allowedMessageOrigins
-if (window.nexa) {
-    window.nexa.postMessage(JSON.stringify({ event: "checkout_complete", orderId: "12345" }));
+if (window.Nexa) {
+    window.Nexa.postMessage(JSON.stringify({ event: "checkout_complete", orderId: "12345" }));
 }
+
+window.addEventListener("nexa-message", (event) => {
+    document.querySelector("#status").textContent = String(event.data);
+});
 ```
+
+The Android implementation exposes the same `window.Nexa.postMessage` interface. Keep messages as strings and validate their contents in the app before acting on them.

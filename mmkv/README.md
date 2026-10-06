@@ -1,46 +1,47 @@
-# `@nexa/mmkv`
+# `dev.nexa.mmkv`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-Tencent%20MMKV-red.svg)](https://github.com/Tencent/MMKV)
 
-Ultra-fast, synchronous key-value storage engine backed by Tencent MMKV. Uses memory-mapped files (`mmap`) and protobuf append-only structures for sub-millisecond reads and writes without async thread-switching overhead.
+Synchronous typed key-value storage backed by Tencent MMKV. The native engine uses memory-mapped files (`mmap`); benchmark on target devices before making latency assumptions.
 
 Supports typed primitives, custom structs (`setObject`/`getObject`), collections (`Array`, `Set`, `Map`), hardware AES encryption, multi-process synchronization, and reactive key observation.
 
 ---
 
+> **Android minimum API:** 21. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.mmkv" as MMKV
+plugin "plugins/mmkv" as MMKV
 
-struct UserPreferences {
+struct ReaderPreferences {
     theme: String,
-    notificationsEnabled: Bool,
-    volume: Float64
+    dailyGoal: Int32
 }
 
-// Module-level persistent store instance
-let store = MMKV.MMKVStore("user_settings", cryptKey: null, multiProcess: false)
-
-component SettingsScreen() {
+app ReadingPreferences {
+    let store = MMKV.MMKVStore("reader-settings", null, false)
     state theme: String = store.getString("theme") ?? "system"
-    state volume: Float64 = store.getFloat64("volume") ?? 0.8
+    state dailyGoal: Int32 = store.getInt32("daily-goal") ?? 20
 
-    fn updateTheme(newTheme: String) {
-        store.setString("theme", newTheme)
-        theme = newTheme
-    }
-
-    fn updateVolume(newVolume: Float64) {
-        store.setFloat64("volume", newVolume)
-        volume = newVolume
-    }
-
-    VStack(spacing: 16) {
-        Text("Current Theme: \(theme)", size: 16)
-        Button("Switch to Dark", action: () => { updateTheme("dark") })
-        Button("Switch to Light", action: () => { updateTheme("light") })
+    body {
+        Column(spacing: 12) {
+            Text("Theme: \(theme)")
+            Text("Daily reading goal: \(dailyGoal) minutes")
+            Button("Use dark theme") {
+                let saved = store.setString("theme", "dark")
+                if saved { theme = "dark" }
+            }
+            Button("Increase daily goal") {
+                dailyGoal = dailyGoal + 5
+                store.setInt32("daily-goal", dailyGoal)
+            }
+            Button("Save preferences object") {
+                store.setObject("reader-preferences", ReaderPreferences(theme, dailyGoal))
+            }
+        }
     }
 }
 ```
@@ -49,13 +50,14 @@ component SettingsScreen() {
 
 ## 2. API Reference
 
-### `MMKVStore` Native Class
+### `MMKVStore` handle
 
-```nexa
-native class MMKVStore {
-    init(instanceID: String, cryptKey: String?, multiProcess: Bool)
-}
-```
+Construct a store with an instance id. Pass a crypt key to encrypt it and `true` for cross-process mode when the same file is intentionally shared across processes. Keep the returned handle for the store's lifetime and call `dispose()` when finished.
+
+| Constructor | Signature | Description |
+|---|---|---|
+| `MMKVStore` | `MMKVStore(instanceID: String, cryptKey: String?, multiProcess: Bool)` | Opens or creates the named store. |
+
 
 #### Properties
 
@@ -114,8 +116,8 @@ native class MMKVStore {
 | `getAllKeysMatching(prefix: String, suffix: String)` | `Array<String>` | Returns keys matching both prefix and suffix |
 | `remove(key: String)` | `Bool` | Removes specific key from store |
 | `removeMany(keys: Array<String>)` | `Int32` | Removes multiple keys and returns count of removed items |
-| `clearAll()` | `Bool` | Removes all keys, retaining mapped file capacity |
-| `clearAllKeepingSpace()` | `Bool` | Removes all keys and truncates mapped file |
+| `clearAll()` | `Bool` | Removes all keys and shrinks the data file to its expected base capacity. |
+| `clearAllKeepingSpace()` | `Bool` | Removes all keys while retaining the current file space for faster later writes. |
 | `trim()` | `Int64` | Compacts storage file and returns reclaimed bytes |
 | `count()` | `Int64` | Total number of keys in store |
 | `totalSize()` | `Int64` | Total file size in bytes |
@@ -124,8 +126,11 @@ native class MMKVStore {
 | `stats()` | `MMKVStats` | Snapshot of store key count, sizes, and page size |
 | `sync()` | `Void` | Synchronously flushes memory-mapped pages to disk |
 | `asyncFlush()` | `Void` | Asynchronously queues disk flush on MMKV background worker |
+| `enableCompareBeforeSet()` | `Bool` | Skips a write when its encoded value matches the existing value. Unsupported with encryption or key expiration. |
+| `disableCompareBeforeSet()` | `Bool` | Disables compare-before-set write skipping. |
 | `rekey(cryptKey: String?)` | `Bool` | Changes encryption key or decrypts store if `null` |
 | `checkContentChanged()` | `Void` | Manually synchronizes memory map with external process writes |
+| `storageExists()` | `Bool` | Checks whether files exist for this store's instance id. |
 | `backup(directory: String)` | `Bool` | Backs up store files to target directory path |
 | `restore(directory: String)` | `Bool` | Restores store files from target directory path |
 | `removeStorage()` | `Bool` | Permanently deletes underlying files from disk |

@@ -1,4 +1,4 @@
-# `@nexa/mail-composer`
+# `dev.nexa.mail-composer`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-MessageUI%20%2F%20Intent%20Chooser-blue.svg)](https://developer.apple.com/documentation/messageui)
@@ -9,51 +9,40 @@ Backed by Apple `MessageUI` (`MFMailComposeViewController`) on iOS and standard 
 
 ---
 
+> **Android minimum API:** 23. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.mail-composer" as Mail
+plugin "plugins/mail-composer" as Mail
 
-component FeedbackScreen() {
+app FeedbackComposer {
     let composer = Mail.MailComposer()
-    state statusMessage: String? = null
+    state status: String = "Ready to send feedback"
+    state sendTask: TaskHandle? = null
 
-    onAppear(() => {
-        composer.onCompleted((result) => {
-            switch result {
-                case Mail.MailComposerResult.sent:
-                    statusMessage = "Thank you! Your feedback has been sent."
-                case Mail.MailComposerResult.saved:
-                    statusMessage = "Draft saved in your mail app."
-                case Mail.MailComposerResult.cancelled:
-                    statusMessage = "Feedback cancelled."
-                case Mail.MailComposerResult.failed:
-                    statusMessage = "Failed to send email."
+    body {
+        OnAppear {
+            composer.completed { result ->
+                status = "Mail flow completed: \(result)"
             }
-        })
-    })
-
-    fn sendFeedback() {
-        if !composer.available {
-            statusMessage = "No email account configured on this device."
-            return
         }
-
-        try {
-            await composer.present(
-                to: ["support@example.com"],
-                subject: "App Feedback",
-                body: "\n\n---\nDevice Info: \(composer.deviceInfo)"
-            )
-        } catch Mail.MailComposerError as err {
-            statusMessage = "Failed to present mail composer: \(err)"
-        }
-    }
-
-    VStack(spacing: 16) {
-        Button("Send Feedback", action: () => { sendFeedback() })
-        if let msg = statusMessage {
-            Text(msg, size: 14)
+        Column(spacing: 12) {
+            Text(status)
+            Button("Write feedback email") {
+                Task.launch(handle: sendTask, executor: TaskExecutor.Main) {
+                    try {
+                        await composer.present(
+                            ["support@example.com"],
+                            "Feedback about Nexa Reader",
+                            "I would like to share feedback about the reading list."
+                        )
+                        status = "Mail composer opened"
+                    } catch {
+                        status = "Mail composer is unavailable"
+                    }
+                }
+            }
         }
     }
 }
@@ -63,13 +52,12 @@ component FeedbackScreen() {
 
 ## 2. API Reference
 
-### `MailComposer` Native Class
+### `MailComposer` handle
 
-```nexa
-native class MailComposer {
-    init()
-}
-```
+| Constructor | Signature | Description |
+|---|---|---|
+| `MailComposer` | `MailComposer()` | Creates a native mail composer handle. |
+
 
 #### Properties
 
@@ -82,7 +70,7 @@ native class MailComposer {
 
 | Method | Return Type | Description |
 |---|---|---|
-| `present(to, subject, body)` | `Void` | Presents the platform's native mail drafting interface |
+| `present(to: Array<String>, subject: String, body: String)` | `async -> Void throws MailComposerError` | Presents the platform's native mail drafting interface |
 
 #### Events
 
@@ -95,10 +83,13 @@ native class MailComposer {
 ### Enums & Errors
 
 #### `MailComposerResult`
-- `sent`: Mail was successfully queued or sent by the system client.
-- `saved`: User saved the email in their local drafts folder.
-- `cancelled`: User discarded the message.
-- `failed`: Mail delivery or composer system error.
+
+| Case | Description |
+|---|---|
+| `sent` | The native composer reported the message as sent. |
+| `saved` | The user saved the message in drafts. |
+| `cancelled` | The user dismissed the composer without sending. |
+| `failed` | The composer reported a failure. |
 
 #### `MailComposerError`
 | Variant | Description |

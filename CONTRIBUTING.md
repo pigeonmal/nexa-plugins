@@ -3,6 +3,18 @@
 Official Nexa plugins live here. Each plugin is a self-contained Nexa package
 that must satisfy the same standards as the compiler and backends.
 
+| **Scope**: create, validate, and generate plugins | **Contract**: `native.nxid` | **Targets**: Swift and Kotlin |
+
+## Quick start
+
+Create a package, validate its contract and implementation paths, then generate its bindings:
+
+```bash
+nexa plugin init dev.nexa.my-plugin --out my-plugin --name MyPlugin
+nexa plugin check my-plugin
+nexa plugin generate my-plugin --target swift --out my-plugin/generated/swift
+```
+
 ## Ground rules
 
 - **No runtime reflection or boxing.** Typed contracts in `native.nxid`, direct
@@ -22,9 +34,9 @@ that must satisfy the same standards as the compiler and backends.
 ```bash
 nexa plugin init dev.nexa.my-plugin --out my-plugin --name MyPlugin
 nexa plugin check my-plugin
-nexa plugin generate my-plugin --target swift
-nexa plugin generate my-plugin --target kotlin
-nexa plugin generate my-plugin --target cpp   # only when C++ is implemented
+nexa plugin generate my-plugin --target swift --out my-plugin/generated/swift
+nexa plugin generate my-plugin --target kotlin --out my-plugin/generated/kotlin
+nexa plugin generate my-plugin --target cpp --out my-plugin/generated/cpp   # only when C++ is implemented
 ```
 
 Validate a minimal `.nx` app that actually calls the plugin before opening a

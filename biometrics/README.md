@@ -1,4 +1,4 @@
-# `@nexa/biometrics`
+# `dev.nexa.biometrics`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Security](https://img.shields.io/badge/Security-Face%20ID%20%2F%20BiometricPrompt-brightgreen.svg)](https://developer.apple.com/documentation/localauthentication)
@@ -9,36 +9,37 @@ Backed by Apple `LocalAuthentication` (Face ID / Touch ID) on iOS and AndroidX `
 
 ---
 
+> **Android minimum API:** 28. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.biometrics" as Biometrics
+plugin "plugins/biometrics" as Biometrics
 
-component SecureVaultScreen() {
-    state isUnlocked: Bool = false
-    state errorMessage: String? = null
+app BiometricsDemo {
+    state authenticated = false
+    state failed = false
 
-    VStack(spacing: 24) {
-        if isUnlocked {
-            Text("Vault Unlocked", size: 20, color: "#34C759")
-            Text("Secret documents are now accessible.")
-        } else {
-            Text("Authentication Required", size: 18, weight: "bold")
-            
+    body {
+        Column(spacing: 12, padding: 20) {
+            Text("Biometric authentication")
             Biometrics.BiometricButton(
-                title: "Unlock with Face ID",
-                reason: "Authenticate to view encrypted credentials",
-                onAuthenticated: () => {
-                    isUnlocked = true
-                    errorMessage = null
-                },
-                onFailed: (failure) => {
-                    errorMessage = "Authentication failed: \(failure)"
-                }
+                title: "Authenticate",
+                reason: "Confirm your identity to continue"
             )
-
-            if let err = errorMessage {
-                Text(err, color: "#FF3B30", size: 14)
+                .onAuthenticated {
+                    authenticated = true
+                    failed = false
+                }
+                .onFailed { error ->
+                    authenticated = false
+                    failed = true
+                }
+            if authenticated {
+                Text("Authenticated")
+            }
+            if failed {
+                Text("Authentication was not completed")
             }
         }
     }
@@ -49,13 +50,10 @@ component SecureVaultScreen() {
 
 ## 2. API Reference
 
-### `BiometricButton` Native Component
+### `BiometricButton` control
 
 User-triggered native authentication control. Initiating authentication requires explicit user tap interaction, ensuring compliance with Apple App Store Review and Android security invariants.
 
-```nexa
-native component BiometricButton
-```
 
 #### Properties
 

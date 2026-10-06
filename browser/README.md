@@ -1,4 +1,4 @@
-# `@nexa/browser`
+# `dev.nexa.browser`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-SFSafariViewController%20%2F%20Custom%20Tabs-blue.svg)](https://developer.apple.com/documentation/safariservices/sfsafariviewcontroller)
@@ -11,33 +11,32 @@ Backed by Apple `SFSafariViewController` on iOS and AndroidX `CustomTabsIntent` 
 
 ---
 
+> **Android minimum API:** 23. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.browser" as Browser
+plugin "plugins/browser" as Browser
 
-component ExternalLinksScreen() {
+app PrivacyLinks {
     let browser = Browser.SystemBrowser()
+    state status: String = "Choose a privacy link"
+    state openTask: TaskHandle? = null
 
-    fn openPrivacyPolicy() {
-        try {
-            await browser.open("https://example.com/privacy", inApp: true)
-        } catch Browser.BrowserError as err {
-            print("Failed to open browser: \(err)")
+    body {
+        Column(spacing: 12) {
+            Text(status)
+            Button("Open privacy policy") {
+                Task.launch(handle: openTask, executor: TaskExecutor.Main) {
+                    try {
+                        await browser.open("https://www.mozilla.org/privacy/", true)
+                        status = "Privacy policy opened"
+                    } catch {
+                        status = "Could not open the browser"
+                    }
+                }
+            }
         }
-    }
-
-    fn openAppStoreReview() {
-        try {
-            await browser.open("https://apps.apple.com/app/id123456", inApp: false)
-        } catch Browser.BrowserError as err {
-            print("Failed to launch external browser: \(err)")
-        }
-    }
-
-    VStack(spacing: 16) {
-        Button("Read Privacy Policy (In-App)", action: () => { openPrivacyPolicy() })
-        Button("Rate on App Store (External)", action: () => { openAppStoreReview() })
     }
 }
 ```
@@ -46,19 +45,18 @@ component ExternalLinksScreen() {
 
 ## 2. API Reference
 
-### `SystemBrowser` Native Class
+### `SystemBrowser` handle
 
-```nexa
-native class SystemBrowser {
-    init()
-}
-```
+| Constructor | Signature | Description |
+|---|---|---|
+| `SystemBrowser` | `SystemBrowser()` | Creates a browser launcher handle. |
+
 
 #### Methods
 
 | Method | Return Type | Description |
 |---|---|---|
-| `open(url: String, inApp: Bool)` | `Void` | Launches target URL. When `inApp` is `true`, opens `SFSafariViewController` / Custom Tab. When `false`, opens default external browser. |
+| `open(url: String, inApp: Bool)` | `async -> Void throws BrowserError` | Launches target URL. When `inApp` is `true`, opens `SFSafariViewController` / Custom Tab. When `false`, opens default external browser. |
 
 ---
 

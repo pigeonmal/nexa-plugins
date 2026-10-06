@@ -1,40 +1,35 @@
-# `@nexa/data-extractor`
+# `dev.nexa.data-extractor`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-NSDataDetector%20%2F%20TextClassifier-purple.svg)](https://developer.apple.com/documentation/foundation/nsdatadetector)
 
-On-device natural language entity detection and parsing. Automatically identifies dates, calendar appointments, phone numbers, web URLs, email addresses, and street addresses inside arbitrary text.
+On-device detection of dates, phone numbers, web URLs, email addresses, and street addresses in message text.
 
-Backed by Apple `NSDataDetector` on iOS and Android `TextClassifier` on Android. Runs 100% offline on-device with zero cloud dependencies or latency.
+Backed by Apple `NSDataDetector` on iOS and Android `TextClassifier` on Android. Detection uses platform text APIs; no Nexa cloud service is involved.
 
 ---
+
+> **Android minimum API:** 28. Set `android.minSdk` to at least this value in `nexa.config.nx`.
 
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.data-extractor" as NLP
+plugin "plugins/data-extractor" as DataExtractor
 
-component SmartMessageScreen() {
-    let extractor = NLP.DataExtractor()
-    state detectedLinks: Array<NLP.ExtractedData> = []
+app MessageReview {
+    let extractor = DataExtractor.DataExtractor()
+    state matches: Array<DataExtractor.ExtractedData> = []
+    state status: String = "Scanning message"
 
-    fn parseIncomingMessage(body: String) {
-        detectedLinks = await extractor.extract(body)
-        for entity in detectedLinks {
-            print("Found \(entity.kind) at [\(entity.start):\(entity.length)]: \(entity.text)")
+    body {
+        OnAppear async {
+            matches = await extractor.extract("Can we meet tomorrow at 3pm? Email mina@example.com or visit https://nexa.dev.")
+            status = "Detected items: \(matches.count)"
         }
-    }
-
-    onAppear(() => {
-        parseIncomingMessage("Let's meet tomorrow at 3pm at 123 Market St or call me at 415-555-0199")
-    })
-
-    VStack(spacing: 8) {
-        FastList(detectedLinks) { entity in
-            HStack {
-                Text("\(entity.kind)", weight: "bold", size: 14)
-                Spacer()
-                Text(entity.text, size: 14, color: "#007AFF")
+        Column(spacing: 8) {
+            Text(status)
+            FastList(matches) { match, index in
+                Text("\(match.kind): \(match.text)")
             }
         }
     }
@@ -45,30 +40,32 @@ component SmartMessageScreen() {
 
 ## 2. API Reference
 
-### `DataExtractor` Native Class
+### `DataExtractor` handle
 
-```nexa
-native class DataExtractor {
-    init()
-}
-```
+| Constructor | Signature | Description |
+|---|---|---|
+| `DataExtractor` | `DataExtractor()` | Creates an on-device text extractor. |
+
 
 #### Methods
 
 | Method | Return Type | Description |
 |---|---|---|
-| `extract(text: String)` | `Array<ExtractedData>` | Parses input string and returns matched entities ordered by UTF-16 offset |
+| `extract(text: String)` | `async -> Array<ExtractedData>` | Parses input string and returns matched entities ordered by UTF-16 offset |
 
 ---
 
 ### Data Structures & Enums
 
 #### `ExtractedDataKind`
-- `date`: Calendar dates, relative days ("tomorrow", "next Monday"), and timestamp expressions.
-- `phoneNumber`: Local and international phone numbers.
-- `url`: Web URLs, IP addresses, and custom URI schemes.
-- `email`: Validated email addresses.
-- `address`: Physical postal addresses and locations.
+
+| Case | Description |
+|---|---|
+| `date` | Calendar dates, relative days ("tomorrow", "next Monday"), and timestamp expressions. |
+| `phoneNumber` | Local and international phone numbers. |
+| `url` | Web URLs, IP addresses, and custom URI schemes. |
+| `email` | Email addresses recognized by the platform text APIs. |
+| `address` | Physical postal addresses and locations. |
 
 #### `ExtractedData`
 | Field | Type | Description |

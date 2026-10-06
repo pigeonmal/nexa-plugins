@@ -1,4 +1,4 @@
-# `@nexa/audio-player`
+# `dev.nexa.audio-player`
 
 [![Nexa Plugin](https://img.shields.io/badge/Nexa-Plugin-blue.svg)](https://github.com/pigeonmal/nexa)
 [![Native Engine](https://img.shields.io/badge/Engine-AVPlayer%20%2F%20Media3-blue.svg)](https://developer.apple.com/documentation/avfoundation/avplayer)
@@ -9,47 +9,66 @@ Backed by Apple `AVPlayer` on iOS and AndroidX `Media3` (ExoPlayer) on Android.
 
 ---
 
+> **Android minimum API:** 26. Set `android.minSdk` to at least this value in `nexa.config.nx`.
+
 ## 1. Quick Start
 
 ```nexa
-plugin "dev.nexa.audio-player" as Audio
+plugin "plugins/audio-player" as AudioPlayer
 
-component MusicPlayerScreen() {
-    let player = Audio.AudioPlayer()
-    state isPlaying: Bool = false
-    state currentTrack: String = "No track loaded"
+app AudioPlayerDemo {
+    let player = AudioPlayer()
+    let trackUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+    state stateChanged = false
+    state failureMessage = ""
+    state ended = false
 
-    onAppear(() => {
-        loadSong("https://example.com/audio/podcast.mp3")
-    })
-
-    onDisappear(() => {
-        player.dispose()
-    })
-
-    fn loadSong(url: String) {
-        try {
-            await player.prepare(url)
-            player.updateMetadata(title: "Deep Dive Podcast", artist: "Nexa Team", album: "Engineering")
-            currentTrack = "Deep Dive Podcast"
-        } catch Audio.AudioPlayerError as err {
-            print("Failed to load song: \(err)")
+    body {
+        OnAppear async {
+            player.stateChanged { current ->
+                stateChanged = true
+            }
+            player.ended {
+                ended = true
+            }
+            player.updateMetadata("SoundHelix Song 1", "SoundHelix", "AudioPlayer demo")
+            try {
+                await player.prepare(trackUrl)
+                player.play()
+            } catch {
+                case AudioPlayer.AudioPlayerError.invalidUrl {
+                    failureMessage = "The track URL is invalid."
+                }
+                case AudioPlayer.AudioPlayerError.playbackFailed(message) {
+                    failureMessage = message
+                }
+            }
         }
-    }
-
-    fn togglePlayback() {
-        if isPlaying {
-            player.pause()
-            isPlaying = false
-        } else {
-            player.play()
-            isPlaying = true
+        Column(spacing: 12) {
+            Text("AudioPlayer demo")
+            if stateChanged {
+                Text("Playback state changed")
+            }
+            Text("Position: \(player.currentTime) / \(player.duration)")
+            Button("Pause") {
+                player.pause()
+            }
+            Button("Resume") {
+                player.play()
+            }
+            Button("Seek to start") {
+                player.seek(0.0)
+            }
+            Button("Set volume to 50%") {
+                player.volume = 0.5
+            }
+            if ended {
+                Text("Playback ended")
+            }
+            if failureMessage != "" {
+                Text(failureMessage)
+            }
         }
-    }
-
-    VStack(spacing: 20) {
-        Text(currentTrack, size: 18, weight: "bold")
-        Button(isPlaying ? "Pause" : "Play", action: () => { togglePlayback() })
     }
 }
 ```
@@ -58,15 +77,14 @@ component MusicPlayerScreen() {
 
 ## 2. API Reference
 
-### `AudioPlayer` Native Class
+### `AudioPlayer` handle
 
 App-wide background audio playback manager.
 
-```nexa
-native class AudioPlayer {
-    init()
-}
-```
+| Constructor | Signature | Description |
+|---|---|---|
+| `AudioPlayer` | `AudioPlayer()` | Creates a player and registers native media controls. |
+
 
 #### Properties
 
@@ -81,7 +99,7 @@ native class AudioPlayer {
 
 | Method | Return Type | Description |
 |---|---|---|
-| `prepare(url: String)` | `Void` | Loads remote URL or local `file://` path. Asynchronously buffers initial stream. |
+| `prepare(url: String)` | `async -> Void throws AudioPlayerError` | Loads remote URL or local `file://` path. Asynchronously buffers initial stream. |
 | `updateMetadata(title: String, artist: String?, album: String?)` | `Void` | Updates OS lock screen, control center, and notification media notifications. |
 | `play()` | `Void` | Resumes or starts audio playback. |
 | `pause()` | `Void` | Suspends audio playback. |

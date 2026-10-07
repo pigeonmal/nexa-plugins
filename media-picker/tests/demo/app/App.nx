@@ -26,6 +26,17 @@ app MediaPickerDemo {
             Text("Selected images: \(imageUris.count)")
             Text("Selected videos: \(videoUris.count)")
             Text(errorMessage)
+
+            Button("Release selected media") {
+                Task.launch(executor: TaskExecutor.Main) {
+                    let cache = MediaPicker.MediaPickerCache()
+                    let removedImages = await cache.removeMany(uris: imageUris)
+                    let removedVideos = await cache.removeMany(uris: videoUris)
+                    errorMessage = "Released \(removedImages + removedVideos) cached files."
+                    imageUris = []
+                    videoUris = []
+                }
+            }
         }
     }
 }

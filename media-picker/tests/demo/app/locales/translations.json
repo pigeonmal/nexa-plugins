@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "sourceLanguage": "en",
+  "strings": {
+    "Choose image": {
+      "source": "Choose image",
+      "translations": {}
+    },
+    "Choose video": {
+      "source": "Choose video",
+      "translations": {}
+    },
+    "Release selected media": {
+      "source": "Release selected media",
+      "translations": {}
+    },
+    "Selected images: {count}": {
+      "source": "Selected images: {count}",
+      "arguments": [
+        "count"
+      ],
+      "argument_types": [
+        "Int32"
+      ],
+      "translations": {}
+    },
+    "Selected videos: {count}": {
+      "source": "Selected videos: {count}",
+      "arguments": [
+        "count"
+      ],
+      "argument_types": [
+        "Int32"
+      ],
+      "translations": {}
+    }
+  }
+}

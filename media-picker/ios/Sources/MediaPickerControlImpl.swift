@@ -30,8 +30,62 @@ private struct PickedMedia: Transferable {
         return PickedMedia(url: destination)
     }
 
-    func removeFromCache() throws {
-        try FileManager.default.removeItem(at: url)
+}
+
+private actor MediaPickerCacheWorker {
+    static let shared = MediaPickerCacheWorker()
+
+    func remove(_ rawURI: String) -> Bool {
+        guard let file = Self.ownedCacheFile(rawURI) else { return false }
+        do {
+            try FileManager.default.removeItem(at: file)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func removeMany(_ uris: [String]) -> Int32 {
+        var removed: Int32 = 0
+        for uri in uris where remove(uri) {
+            removed += 1
+        }
+        return removed
+    }
+
+    private static func ownedCacheFile(_ rawURI: String) -> URL? {
+        guard let components = URLComponents(string: rawURI),
+              components.scheme?.lowercased() == "file",
+              components.host == nil,
+              components.query == nil,
+              components.fragment == nil,
+              let url = components.url else {
+            return nil
+        }
+
+        let file = url.standardizedFileURL.resolvingSymlinksInPath()
+        let cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("NexaMediaPicker", isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard file.deletingLastPathComponent() == cacheDirectory,
+              (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+            return nil
+        }
+        return file
+    }
+}
+
+@MainActor
+public final class MediaPickerCacheImpl: MediaPickerCacheSpec {
+    public init() {}
+
+    public func remove(_ uri: String) async -> Bool {
+        await MediaPickerCacheWorker.shared.remove(uri)
+    }
+
+    public func removeMany(_ uris: [String]) async -> Int32 {
+        await MediaPickerCacheWorker.shared.removeMany(uris)
     }
 }
 
@@ -105,11 +159,16 @@ public struct MediaPickerControlImpl<Content: View>: View {
                 imported.append(media)
             }
             try Task.checkCancellation()
-            onPicked?(imported.map { $0.url.absoluteString })
-        } catch {
-            for media in imported {
-                try? media.removeFromCache()
+            let uris = imported.map { $0.url.absoluteString }
+            if let onPicked {
+                onPicked(uris)
+            } else {
+                _ = await MediaPickerCacheWorker.shared.removeMany(uris)
             }
+        } catch {
+            _ = await MediaPickerCacheWorker.shared.removeMany(
+                imported.map { $0.url.absoluteString }
+            )
             if !Task.isCancelled {
                 onFailed?(error.localizedDescription)
             }

@@ -7,3 +7,17 @@ native component MediaPickerControl {
     event picked(uris: Array<String>)
     event failed(message: String)
 }
+
+/// Removes copied media files from this plugin's private cache directory.
+/// The returned file URIs are temporary and should be removed after the app
+/// has finished displaying or processing them.
+native class MediaPickerCache {
+    init()
+
+    /// Removes one URI previously returned by `MediaPickerControl.picked`.
+    /// Returns `false` for an invalid, missing, or non-owned file.
+    async fn remove(uri: String) -> Bool
+
+    /// Removes the listed URIs and returns the number of files removed.
+    async fn removeMany(uris: Array<String>) -> Int32
+}

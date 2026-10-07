@@ -42,10 +42,27 @@ app MediaPickerDemo {
             Text("Selected images: \(imageUris.count)")
             Text("Selected videos: \(videoUris.count)")
             Text(errorMessage)
+
+            Button("Release selected media") {
+                Task.launch(executor: TaskExecutor.Main) {
+                    let cache = MediaPicker.MediaPickerCache()
+                    let removedImages = await cache.removeMany(uris: imageUris)
+                    let removedVideos = await cache.removeMany(uris: videoUris)
+                    errorMessage = "Released \(removedImages + removedVideos) cached files."
+                    imageUris = []
+                    videoUris = []
+                }
+            }
         }
     }
 }
 ```
+
+The selected files are stored in the app's private cache and remain there after
+the picker closes. Remove them when the app no longer needs them with
+`MediaPickerCache.remove(uri:)` or `removeMany(uris:)`; the methods only delete
+files owned by this plugin. Selections without a `picked` handler are cleaned up
+automatically.
 
 ---
 
@@ -67,7 +84,7 @@ Wraps any child component (`content`) and presents the native picker when tapped
 
 | Event | Payload | Description |
 |---|---|---|
-| `picked` | `uris: Array<String>` | Fired when selection completes. Every selected asset is copied to the app cache directory and returned as a local `file://` URI in picker order. The source encoding and image metadata, including EXIF orientation, are retained for metadata-aware decoders. If any copy fails or the control leaves composition during copying, partial copies are removed and `failed` is fired for non-cancellation errors. |
+| `picked` | `uris: Array<String>` | Fired when selection completes. Every selected asset is copied to the app cache directory and returned as a local `file://` URI in picker order. The source encoding and image metadata, including EXIF orientation, are retained for metadata-aware decoders. Remove returned files with `MediaPickerCache` when finished. If any copy fails or the control leaves composition during copying, partial copies are removed and `failed` is fired for non-cancellation errors. |
 | `failed` | `message: String` | Fired when copying or presenting the selected media fails. Cancellation produces no selected URIs. |
 
 ---

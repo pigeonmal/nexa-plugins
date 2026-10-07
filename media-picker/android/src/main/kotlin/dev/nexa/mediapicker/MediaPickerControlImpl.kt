@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.role
+import dev.nexa.core.NexaRuntimeCore
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -42,16 +43,30 @@ public fun MediaPickerControlImpl(
     fun copySelection(uris: List<Uri>) {
         if (uris.isEmpty()) return
         scope.launch {
-            val selected = try {
-                copySelectedMedia(context, uris)
+            var copiedFiles: List<File> = emptyList()
+            val selectedFiles = try {
+                copySelectedMedia(context, uris).also { copiedFiles = it }
+                    .also { coroutineContext.ensureActive() }
             } catch (error: CancellationException) {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    copiedFiles.forEach(File::delete)
+                }
                 throw error
             } catch (error: Exception) {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    copiedFiles.forEach(File::delete)
+                }
                 latestOnFailed.value?.invoke(error.message ?: "The selected media could not be copied.")
                 return@launch
             }
-            coroutineContext.ensureActive()
-            latestOnPicked.value?.invoke(selected)
+            val handler = latestOnPicked.value
+            if (handler == null) {
+                withContext(Dispatchers.IO) {
+                    selectedFiles.forEach(File::delete)
+                }
+            } else {
+                handler(selectedFiles.map { Uri.fromFile(it).toString() })
+            }
         }
     }
     val singleLauncher = rememberLauncherForActivityResult(
@@ -90,7 +105,7 @@ public fun MediaPickerControlImpl(
     }
 }
 
-private suspend fun copySelectedMedia(context: Context, sources: List<Uri>): List<String> {
+private suspend fun copySelectedMedia(context: Context, sources: List<Uri>): List<File> {
     val copiedFiles = mutableListOf<File>()
     try {
         return withContext(Dispatchers.IO) {
@@ -99,13 +114,43 @@ private suspend fun copySelectedMedia(context: Context, sources: List<Uri>): Lis
                 copiedFiles += copyPickedMedia(context, source)
             }
             currentCoroutineContext().ensureActive()
-            copiedFiles.map { Uri.fromFile(it).toString() }
+            copiedFiles.toList()
         }
     } catch (error: Exception) {
         withContext(NonCancellable + Dispatchers.IO) {
             copiedFiles.forEach(File::delete)
         }
         throw error
+    }
+}
+
+/** Deletes only files directly owned by this plugin's private cache directory. */
+public class MediaPickerCacheImpl : MediaPickerCacheSpec {
+    override suspend fun remove(uri: String): Boolean = withContext(Dispatchers.IO) {
+        val file = ownedCacheFile(uri) ?: return@withContext false
+        file.isFile && file.delete()
+    }
+
+    override suspend fun removeMany(uris: List<String>): Int = withContext(Dispatchers.IO) {
+        var removed = 0
+        for (uri in uris) {
+            val file = ownedCacheFile(uri) ?: continue
+            if (file.isFile && file.delete()) removed++
+        }
+        removed
+    }
+
+    private fun ownedCacheFile(rawUri: String): File? {
+        val uri = Uri.parse(rawUri)
+        if (uri.scheme != "file" || !uri.host.isNullOrEmpty() || uri.query != null || uri.fragment != null) {
+            return null
+        }
+        val file = File(uri.path ?: return null).canonicalFile
+        val cacheDirectory = File(
+            NexaRuntimeCore.context().applicationContext.cacheDir,
+            MEDIA_PICKER_CACHE_DIRECTORY,
+        ).canonicalFile
+        return file.takeIf { it.parentFile == cacheDirectory }
     }
 }
 
@@ -135,3 +180,4 @@ private fun copyPickedMedia(context: Context, source: Uri): File {
 }
 
 private const val COPY_BUFFER_SIZE_BYTES = 64 * 1024
+private const val MEDIA_PICKER_CACHE_DIRECTORY = "nexa-media-picker"

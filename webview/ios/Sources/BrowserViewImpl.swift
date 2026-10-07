@@ -7,6 +7,7 @@ import WebKit
 public struct BrowserViewImpl: UIViewRepresentable {
     public let url: String
     public let javaScriptEnabled: Bool
+    public let offlineCacheEnabled: Bool
     public let allowedMessageOrigins: [String]
     public let message: String?
     public let onMessageReceived: ((String) -> Void)?
@@ -16,6 +17,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
     public init(
         url: String,
         javaScriptEnabled: Bool,
+        offlineCacheEnabled: Bool,
         allowedMessageOrigins: [String],
         message: String?,
         onMessageReceived: ((String) -> Void)?,
@@ -24,6 +26,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
     ) {
         self.url = url
         self.javaScriptEnabled = javaScriptEnabled
+        self.offlineCacheEnabled = offlineCacheEnabled
         self.allowedMessageOrigins = allowedMessageOrigins
         self.message = message
         self.onMessageReceived = onMessageReceived
@@ -34,6 +37,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
     public func makeCoordinator() -> Coordinator {
         Coordinator(
             javaScriptEnabled: javaScriptEnabled,
+            offlineCacheEnabled: offlineCacheEnabled,
             allowedMessageOrigins: allowedMessageOrigins,
             message: message,
             onMessageReceived: onMessageReceived,
@@ -63,7 +67,9 @@ public struct BrowserViewImpl: UIViewRepresentable {
     public func updateUIView(_ webView: WKWebView, context: Context) {
         let coordinator = context.coordinator
         let javaScriptChanged = coordinator.javaScriptEnabled != javaScriptEnabled
+        let cachePolicyChanged = coordinator.offlineCacheEnabled != offlineCacheEnabled
         coordinator.javaScriptEnabled = javaScriptEnabled
+        coordinator.offlineCacheEnabled = offlineCacheEnabled
         coordinator.updateMessage(message)
         coordinator.onMessageReceived = onMessageReceived
         coordinator.onNavigated = onNavigated
@@ -77,7 +83,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
                 controller.addUserScript(script)
             }
         }
-        if javaScriptChanged || originsChanged { coordinator.requestedURL = nil }
+        if javaScriptChanged || originsChanged || cachePolicyChanged { coordinator.requestedURL = nil }
         coordinator.load(url, in: webView)
         coordinator.sendCurrentMessage(to: webView)
     }
@@ -91,6 +97,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
     @MainActor
     public final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         fileprivate var javaScriptEnabled: Bool
+        fileprivate var offlineCacheEnabled: Bool
         fileprivate var allowedMessageOrigins: Set<String>
         fileprivate var invalidMessageOrigins: [String]?
         fileprivate var reportedInvalidMessageOrigins: [String]?
@@ -104,6 +111,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
 
         fileprivate init(
             javaScriptEnabled: Bool,
+            offlineCacheEnabled: Bool,
             allowedMessageOrigins: [String],
             message: String?,
             onMessageReceived: ((String) -> Void)?,
@@ -111,6 +119,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
             onFailed: ((String) -> Void)?
         ) {
             self.javaScriptEnabled = javaScriptEnabled
+            self.offlineCacheEnabled = offlineCacheEnabled
             let normalizedOrigins = allowedMessageOrigins.compactMap(BrowserViewImpl.normalizeHttpsOrigin)
             let hasInvalidOrigins = normalizedOrigins.count != allowedMessageOrigins.count ||
                 Set(normalizedOrigins).count != allowedMessageOrigins.count
@@ -142,7 +151,9 @@ public struct BrowserViewImpl: UIViewRepresentable {
 
             pageLoaded = false
             lastSentMessage = nil
-            webView.load(URLRequest(url: target))
+            var request = URLRequest(url: target)
+            request.cachePolicy = offlineCacheEnabled ? .returnCacheDataElseLoad : .useProtocolCachePolicy
+            webView.load(request)
         }
 
         fileprivate func sendCurrentMessage(to webView: WKWebView) {

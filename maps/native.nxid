@@ -6,10 +6,19 @@ struct MapPin {
     longitude: Float64
 }
 
+/// A point in a route overlay, in display order.
+struct MapCoordinate {
+    latitude: Float64
+    longitude: Float64
+}
+
 native component MapView {
     prop centerLatitude: Float64
     prop centerLongitude: Float64
     prop zoom: Float64 = 12.0
     prop pins: Array<MapPin>
+    prop markerColor: String?
+    prop route: Array<MapCoordinate>?
+    prop routeColor: String?
     event pinSelected(id: String)
 }

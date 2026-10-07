@@ -1,5 +1,6 @@
 import Foundation
 import MMKV
+import UIKit
 
 /// One MMKV store, backed by the memory-mapped file MMKV opened for
 /// `instanceID`.
@@ -31,6 +32,7 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     private let store: MMKV?
     private var observedKeys: Set<String> = []
     private var isDisposed = false
+    private var backgroundObserver: NSObjectProtocol?
 
     public init(_ instanceID: String, _ cryptKey: String?, _ multiProcess: Bool) {
         self.instanceID = instanceID
@@ -56,6 +58,16 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
         }
         if multiProcess {
             MMKVStoreObserver.shared.register(self)
+        }
+        backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.isDisposed else { return }
+                self.store?.sync()
+            }
         }
     }
 
@@ -384,12 +396,17 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     public func dispose() {
         guard !isDisposed else { return }
         isDisposed = true
+        if let backgroundObserver {
+            NotificationCenter.default.removeObserver(backgroundObserver)
+            self.backgroundObserver = nil
+        }
         if isMultiProcess {
             MMKVStoreObserver.shared.unregister(self)
         }
         onValueChanged = nil
         onContentChanged = nil
         observedKeys.removeAll()
+        store?.sync()
         store?.close()
     }
 

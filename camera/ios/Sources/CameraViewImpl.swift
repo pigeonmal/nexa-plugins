@@ -426,9 +426,9 @@ private final class CameraCaptureEngine: NSObject, @unchecked Sendable,
 
         let preset: AVCaptureSession.Preset
         if configuration.recording {
-            preset = .high
+            preset = configuration.frameResolution.capturePreset
         } else if configuration.imageStreamEnabled || configuration.barcodeScanningEnabled {
-            preset = configuration.frameResolution == .hd ? .hd1280x720 : .vga640x480
+            preset = configuration.frameResolution.capturePreset
         } else {
             preset = .photo
         }
@@ -631,6 +631,17 @@ private final class CameraCaptureEngine: NSObject, @unchecked Sendable,
     }
 }
 
+private extension CameraFrameResolution {
+    var capturePreset: AVCaptureSession.Preset {
+        switch self {
+        case .vga: .vga640x480
+        case .hd: .hd1280x720
+        case .fullHd: .hd1920x1080
+        case .uhd4k: .hd4K3840x2160
+        }
+    }
+}
+
 private extension CameraBarcodeFormat {
     var avFoundationTypes: [AVMetadataObject.ObjectType] {
         switch self {
@@ -656,7 +667,7 @@ private extension AVMetadataObject.ObjectType {
         // AVFoundation reports UPC-A symbols as EAN-13 metadata. Preserve the
         // requested Nexa format so UPC-A scanning works like the Android API.
         if self == .ean13, selectedFormat == .upcA { return .upcA }
-        switch self {
+        return switch self {
         case .aztec: .aztec
         case .codabar: .codabar
         case .code39: .code39

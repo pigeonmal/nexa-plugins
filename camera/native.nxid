@@ -23,6 +23,8 @@ enum CameraBarcodeFormat {
 enum CameraFrameResolution {
     vga
     hd
+    fullHd
+    uhd4k
 }
 
 struct CameraBarcode {

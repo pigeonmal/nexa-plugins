@@ -30,7 +30,8 @@ public class DatabaseImpl(
 
     private val name = name
     private val lock = Any()
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ioJob = SupervisorJob()
+    private val ioScope = CoroutineScope(ioJob + Dispatchers.IO)
     private val disposed = AtomicBoolean(false)
     private val invalidationKey = name
     private val invalidationUri = Uri.parse("content://dev.nexa.sqlite.provider/$name/invalidation")
@@ -315,9 +316,13 @@ public class DatabaseImpl(
                 context.contentResolver.unregisterContentObserver(observer)
             } catch (_: Exception) {}
             ioScope.launch {
-                synchronized(lock) {
-                    database?.close()
-                    database = null
+                try {
+                    synchronized(lock) {
+                        database?.close()
+                        database = null
+                    }
+                } finally {
+                    ioJob.cancel()
                 }
             }
         }
@@ -337,6 +342,7 @@ public class DatabaseImpl(
     @Suppress("deprecation")
     protected fun finalize() {
         if (disposed.compareAndSet(false, true)) {
+            ioJob.cancel()
             try {
                 NexaRuntimeCore.context().applicationContext.contentResolver
                     .unregisterContentObserver(observer)

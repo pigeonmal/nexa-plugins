@@ -25,8 +25,12 @@ app EchoChat {
 
     body {
         OnAppear {
+            socket.configureReconnect(5)
             socket.messageReceived { text -> received = text }
             socket.stateChanged { current -> status = "Connection state changed" }
+            socket.reconnecting { attempt, delayMillis ->
+                status = "Reconnect attempt \(attempt) in \(delayMillis) ms"
+            }
             Task.launch(handle: connectTask, executor: TaskExecutor.Main) {
                 try {
                     await socket.connect()
@@ -59,7 +63,7 @@ app EchoChat {
 
 ### `WebSocket` handle
 
-The asynchronous `connect()` call begins the connection attempt; connection state and transport failures arrive through events. Dispose the handle when the owning screen or service ends.
+The asynchronous `connect()` call begins the connection attempt; connection state and transport failures arrive through events. Optional retry uses capped exponential backoff after transport failures or abnormal remote closes. Dispose the handle when the owning screen or service ends.
 
 | Constructor | Signature | Description |
 |---|---|---|
@@ -76,20 +80,22 @@ The asynchronous `connect()` call begins the connection attempt; connection stat
 
 | Method | Return Type | Description |
 |---|---|---|
-| `connect()` | `async -> Void throws WebSocketError` | Starts the WebSocket handshake; throws `invalidUrl` for an unsupported or malformed URL and `alreadyConnected` when a connection is already active. |
+| `connect()` | `async -> Void throws WebSocketError` | Starts the WebSocket handshake; throws `invalidUrl` for an unsupported or malformed URL and `alreadyConnected` when a connection is already active or terminal. |
+| `configureReconnect(maxAttempts: Int32)` | `Void` | Sets the retry limit while the socket is `idle`, before `connect()`. A positive value enables capped exponential backoff; zero or a negative value disables retries. |
 | `send(text: String)` | `Bool` | Queues a UTF-8 text frame. `true` means the local queue accepted it, not that the peer received it. |
 | `sendBytes(bytes: Bytes)` | `Bool` | Queues a binary frame. `true` means the local queue accepted it, not that the peer received it. |
-| `close()` | `Void` | Performs normal RFC 6455 close handshake (Code 1000). |
-| `dispose()` | `Void` | Forcibly terminates socket task, closes network sockets, and unregisters listeners. |
+| `close()` | `Void` | Performs normal RFC 6455 close handshake (Code 1000) and cancels any pending retry. |
+| `dispose()` | `Void` | Forcibly terminates the socket task, cancels retry work, closes network sockets, and unregisters listeners. |
 
 #### Events
 
 | Event | Payload | Description |
 |---|---|---|
-| `stateChanged` | `state: WebSocketState` | Fired when connection transitions between handshake, open, closing, or closed |
+| `stateChanged` | `state: WebSocketState` | Fired when connection transitions between idle, connecting, open, reconnecting, closing, closed, or failed |
+| `reconnecting` | `attempt: Int32, delayMillis: Int32` | Fired before a retry. Delay doubles from 250 ms and is capped at 8,000 ms. A successful connection resets the attempt count. |
 | `messageReceived` | `text: String` | Fired upon arrival of a completed UTF-8 text message |
 | `binaryReceived` | `bytes: Bytes` | Fired upon arrival of a binary message buffer |
-| `failed` | `message: String` | Fired on transport aborts, DNS errors, or protocol violations |
+| `failed` | `message: String` | Fired when a transport abort, DNS error, protocol violation, or abnormal remote close cannot be retried, or when configured attempts are exhausted. Recoverable failures emit `reconnecting`. Normal remote close and explicit `close()` are final and do not retry. |
 
 ---
 
@@ -102,6 +108,7 @@ The asynchronous `connect()` call begins the connection attempt; connection stat
 | `idle` | Socket was created, but `connect()` has not been called. |
 | `connecting` | TCP connection and WebSocket upgrade are in progress. |
 | `open` | Bidirectional communication is active. |
+| `reconnecting` | A transport failure or abnormal remote close occurred; a retry is scheduled. |
 | `closing` | A close frame was sent or received; teardown is pending. |
 | `closed` | Socket disconnected cleanly. |
 | `failed` | A transport or protocol failure occurred. |

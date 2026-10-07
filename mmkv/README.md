@@ -124,7 +124,7 @@ Construct a store with an instance id. Pass a crypt key to encrypt it and `true`
 | `actualSize()` | `Int64` | Byte count of active payload data |
 | `valueSize(key: String)` | `Int64` | Size of specific key's value including protobuf header |
 | `stats()` | `MMKVStats` | Snapshot of store key count, sizes, and page size |
-| `sync()` | `Void` | Synchronously flushes memory-mapped pages to disk |
+| `sync()` | `Void` | Synchronously flushes memory-mapped pages to disk. The store also syncs when the app enters the background and before `dispose()` closes the handle. |
 | `asyncFlush()` | `Void` | Asynchronously queues disk flush on MMKV background worker |
 | `enableCompareBeforeSet()` | `Bool` | Skips a write when its encoded value matches the existing value. Unsupported with encryption or key expiration. |
 | `disableCompareBeforeSet()` | `Bool` | Disables compare-before-set write skipping. |
@@ -134,7 +134,7 @@ Construct a store with an instance id. Pass a crypt key to encrypt it and `true`
 | `backup(directory: String)` | `Bool` | Backs up store files to target directory path |
 | `restore(directory: String)` | `Bool` | Restores store files from target directory path |
 | `removeStorage()` | `Bool` | Permanently deletes underlying files from disk |
-| `dispose()` | `Void` | Unmaps memory pages and releases native store handle |
+| `dispose()` | `Void` | Flushes pending writes, unmaps memory pages, and releases the native store handle |
 
 ---
 

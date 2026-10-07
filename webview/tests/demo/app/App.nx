@@ -11,6 +11,7 @@ app WebViewDemo {
             WebView.BrowserView(
                 url: "https://example.com",
                 javaScriptEnabled: true,
+                offlineCacheEnabled: true,
                 allowedMessageOrigins: ["https://example.com"],
                 message: outgoingMessage,
             ).onMessageReceived { value ->

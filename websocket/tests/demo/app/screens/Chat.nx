@@ -6,8 +6,12 @@ screen Chat {
     state failure = ""
 
     OnAppear async {
+            socket.configureReconnect(5)
             socket.stateChanged { current ->
                 connection = "Connection state changed"
+            }
+            socket.reconnecting { attempt, delayMillis ->
+                connection = "Reconnect attempt \(attempt) in \(delayMillis) ms"
             }
             socket.messageReceived { text ->
                 received = text

@@ -10,7 +10,7 @@ plugin {
         sources: ["ios/Sources/**/*.swift"]
         frameworks: ["CoreMotion"]
         usageDescriptions {
-            NSMotionUsageDescription: "Motion data is used to provide the pedometer and fitness features you start."
+            NSMotionUsageDescription: "Motion and barometer data is used only for the sensor features you start."
         }
     }
     android {

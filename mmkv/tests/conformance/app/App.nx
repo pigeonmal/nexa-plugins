@@ -197,7 +197,7 @@ app MmkvConformance {
                 }
             }
 
-            Tab(index: 1, label: "Conformance", icon: "checkmark") {
+            Tab(index: 1, label: "Conformance", icon: "check") {
                 Column(spacing: 12) {
                     Button("Generic ees") {
                         store.setObject("options", PlayerOptions(true, 0.5, PlaybackState.playing, ["a"]))

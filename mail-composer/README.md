@@ -71,6 +71,9 @@ app FeedbackComposer {
 | Method | Return Type | Description |
 |---|---|---|
 | `present(to: Array<String>, subject: String, body: String)` | `async -> Void throws MailComposerError` | Presents the platform's native mail drafting interface |
+| `presentWithAttachments(to: Array<String>, subject: String, body: String, attachments: Array<MailAttachment>)` | `async -> Void throws MailComposerError` | Presents a draft with local attachments. Android accepts `content://` provider URIs; iOS accepts app-accessible `file://` URLs and maps file reads off the main actor before presenting. |
+
+Android grants the selected mail app read access to provider URIs without copying the files. MessageUI accepts attachment `Data`, so iOS reads each app-accessible file into the draft; keep iOS attachments a reasonable size.
 
 #### Events
 
@@ -81,6 +84,14 @@ app FeedbackComposer {
 ---
 
 ### Enums & Errors
+
+#### `MailAttachment`
+
+| Field | Type | Description |
+|---|---|---|
+| `uri` | `String` | Android content URI or iOS app-accessible file URL. |
+| `mimeType` | `String` | MIME type supplied to the native mail app. |
+| `fileName` | `String` | Name shown for the attached file. |
 
 #### `MailComposerResult`
 
@@ -96,3 +107,4 @@ app FeedbackComposer {
 |---|---|
 | `unavailable` | Device has no email client or active email accounts configured |
 | `presentationUnavailable` | Current UI viewController / Activity cannot present modal sheets |
+| `attachmentUnavailable` | Attachment URI, file access, MIME type, or name is invalid |

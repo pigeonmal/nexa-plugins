@@ -1,6 +1,6 @@
 {
   "version": 1,
   "plugins": [
-    {"alias":"Maps","id":"dev.nexa.maps","source":"path:../../..","revision":null,"package":null,"contentHash":"aea6cccc3d916f98"}
+    {"alias":"Maps","id":"dev.nexa.maps","source":"path:../../..","revision":null,"package":null,"contentHash":"612fa0bf2a45f510"}
   ]
 }

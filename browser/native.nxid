@@ -10,4 +10,8 @@ native class SystemBrowser {
 
     /// `inApp` uses Safari's browser controller on iOS and Custom Tabs on Android.
     async fn open(url: String, inApp: Bool) throws BrowserError
+
+    /// Opens an HTTP(S) URL in the native in-app browser with an optional
+    /// six-digit hex toolbar color shared by Safari and Custom Tabs.
+    async fn openInApp(url: String, toolbarColor: String?) throws BrowserError
 }

@@ -29,7 +29,7 @@ app PrivacyLinks {
             Button("Open privacy policy") {
                 Task.launch(handle: openTask, executor: TaskExecutor.Main) {
                     try {
-                        await browser.open("https://www.mozilla.org/privacy/", true)
+                        await browser.openInApp("https://www.mozilla.org/privacy/", "#1E88E5")
                         status = "Privacy policy opened"
                     } catch {
                         status = "Could not open the browser"
@@ -57,6 +57,7 @@ app PrivacyLinks {
 | Method | Return Type | Description |
 |---|---|---|
 | `open(url: String, inApp: Bool)` | `async -> Void throws BrowserError` | Launches target URL. When `inApp` is `true`, opens `SFSafariViewController` / Custom Tab. When `false`, opens default external browser. |
+| `openInApp(url: String, toolbarColor: String?)` | `async -> Void throws BrowserError` | Opens an HTTP(S) URL in Safari / Custom Tabs with an optional six-digit hex toolbar tint. `null` keeps the system default; malformed colors throw `invalidURL`. |
 
 ---
 

@@ -3,6 +3,7 @@
 native component MediaPickerControl {
     content
     prop isVideo: Bool
-    event picked(uri: String)
+    prop selectionLimit: Int32 = 0
+    event picked(uris: Array<String>)
     event failed(message: String)
 }

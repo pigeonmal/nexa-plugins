@@ -1,6 +1,15 @@
 error MailComposerError {
     unavailable
     presentationUnavailable
+    attachmentUnavailable
+}
+
+/// A local file to attach. Android accepts provider-owned `content://` URIs;
+/// iOS accepts `file://` URLs accessible to the app.
+struct MailAttachment {
+    uri: String
+    mimeType: String
+    fileName: String
 }
 
 enum MailComposerResult {
@@ -22,6 +31,15 @@ native class MailComposer {
 
     /// Presents a message addressed to the supplied recipients.
     async fn present(to: Array<String>, subject: String, body: String) throws MailComposerError
+
+    /// Presents a draft with local attachments. Android shares provider URIs;
+    /// iOS reads app-accessible files before presenting MessageUI.
+    async fn presentWithAttachments(
+        to: Array<String>,
+        subject: String,
+        body: String,
+        attachments: Array<MailAttachment>
+    ) throws MailComposerError
 
     /// Reports the result after the iOS composer is dismissed. Android's
     /// external mail-app chooser does not expose the delivery result.

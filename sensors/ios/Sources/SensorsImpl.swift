@@ -5,18 +5,24 @@ import Foundation
 public final class SensorsImpl: SensorsSpec {
     private let motionManager = CMMotionManager()
     private let pedometer = CMPedometer()
+    private let altimeter = CMAltimeter()
 
     private var isDisposed = false
     private var isAccelerometerRunning = false
     private var isGyroscopeRunning = false
+    private var isBarometerRunning = false
     private var isPedometerRunning = false
+    private var barometerIntervalSeconds = 0.1
+    private var lastBarometerTimestamp: TimeInterval?
 
     public var onAccelerometerChanged: ((MotionReading) -> Void)?
     public var onGyroscopeChanged: ((MotionReading) -> Void)?
+    public var onPressureChanged: ((PressureReading) -> Void)?
     public var onStepsChanged: ((PedometerReading) -> Void)?
 
     public var accelerometerAvailable: Bool { motionManager.isAccelerometerAvailable }
     public var gyroscopeAvailable: Bool { motionManager.isGyroAvailable }
+    public var barometerAvailable: Bool { CMAltimeter.isRelativeAltitudeAvailable() }
     public var pedometerAvailable: Bool { CMPedometer.isStepCountingAvailable() }
 
     public init() {}
@@ -85,6 +91,46 @@ public final class SensorsImpl: SensorsSpec {
         motionManager.stopGyroUpdates()
     }
 
+    public func startBarometer(_ intervalMs: Int32) async throws(SensorError) {
+        try ensureActive()
+        try validateInterval(intervalMs)
+        guard barometerAvailable else {
+            throw .barometerUnavailable
+        }
+        let authorization = CMAltimeter.authorizationStatus()
+        if authorization == .denied || authorization == .restricted {
+            throw .permissionNotGranted
+        }
+
+        barometerIntervalSeconds = Double(intervalMs) / 1_000
+        lastBarometerTimestamp = nil
+        isBarometerRunning = true
+        altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, error in
+            guard let self, let data, error == nil else { return }
+            MainActor.assumeIsolated {
+                guard self.isBarometerRunning, !self.isDisposed else { return }
+                if let previous = self.lastBarometerTimestamp,
+                   data.timestamp - previous < self.barometerIntervalSeconds {
+                    return
+                }
+                self.lastBarometerTimestamp = data.timestamp
+                self.onPressureChanged?(
+                    PressureReading(
+                        hectopascals: data.pressure.doubleValue * 10,
+                        timestampUnixSeconds: Self.unixTimestamp(data.timestamp)
+                    )
+                )
+            }
+        }
+    }
+
+    public func stopBarometer() {
+        guard isBarometerRunning else { return }
+        isBarometerRunning = false
+        lastBarometerTimestamp = nil
+        altimeter.stopRelativeAltitudeUpdates()
+    }
+
     public func startPedometer() async throws(SensorError) {
         try ensureActive()
         guard pedometerAvailable else {
@@ -122,10 +168,12 @@ public final class SensorsImpl: SensorsSpec {
         guard !isDisposed else { return }
         stopAccelerometer()
         stopGyroscope()
+        stopBarometer()
         stopPedometer()
         isDisposed = true
         onAccelerometerChanged = nil
         onGyroscopeChanged = nil
+        onPressureChanged = nil
         onStepsChanged = nil
     }
 

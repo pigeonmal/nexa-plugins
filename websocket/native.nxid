@@ -3,6 +3,7 @@ enum WebSocketState {
     idle
     connecting
     open
+    reconnecting
     closing
     closed
     failed
@@ -20,6 +21,7 @@ native class WebSocket {
 
     /// Starts one connection. Handshake success and failure arrive as state events.
     async fn connect() throws WebSocketError
+    fn configureReconnect(maxAttempts: Int32)
 
     /// Returns true when the local platform queue accepts the message; this does not confirm peer delivery.
     fn send(text: String) -> Bool
@@ -30,6 +32,7 @@ native class WebSocket {
     fn dispose()
 
     event stateChanged(state: WebSocketState)
+    event reconnecting(attempt: Int32, delayMillis: Int32)
     event messageReceived(text: String)
     event binaryReceived(bytes: Bytes)
     event failed(message: String)

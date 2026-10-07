@@ -8,6 +8,7 @@ Hardware motion sensors with unified, physical scientific units across iOS and A
 Backed by Apple `CoreMotion` on iOS and Android `SensorManager` on Android:
 - **Accelerometer**: Calibrated in meters per second squared ($m/s^2$).
 - **Gyroscope**: Calibrated in radians per second ($rad/s$).
+- **Barometer**: Ambient pressure reported in hectopascals ($hPa$), with events throttled to the requested interval.
 - **Pedometer**: Step count accumulated during the active session.
 
 ---
@@ -23,6 +24,7 @@ app SensorsDemo {
     let sensors = Sensors()
     state accelerationX = 0.0
     state rotationZ = 0.0
+    state pressure: Float64 = 0.0
     state steps: Int64 = 0
     state sensorError = ""
 
@@ -34,6 +36,9 @@ app SensorsDemo {
             sensors.gyroscopeChanged { reading ->
                 rotationZ = reading.z
             }
+            sensors.pressureChanged { reading ->
+                pressure = reading.hectopascals
+            }
             sensors.stepsChanged { reading ->
                 steps = reading.steps
             }
@@ -41,6 +46,9 @@ app SensorsDemo {
             try {
                 await sensors.startAccelerometer(50)
                 await sensors.startGyroscope(50)
+                if sensors.barometerAvailable {
+                    await sensors.startBarometer(100)
+                }
             } catch {
                 case Sensors.SensorError.accelerometerUnavailable {
                     sensorError = "Accelerometer unavailable"
@@ -50,6 +58,9 @@ app SensorsDemo {
                 }
                 case Sensors.SensorError.invalidInterval(intervalMs) {
                     sensorError = "Invalid sampling interval: \(intervalMs)"
+                }
+                case Sensors.SensorError.permissionNotGranted {
+                    sensorError = "Motion permission not granted"
                 }
                 case Sensors.SensorError.disposed {
                     sensorError = "Sensor was disposed"
@@ -87,6 +98,7 @@ app SensorsDemo {
         Column {
             Text("Acceleration X: \(accelerationX) m/s²")
             Text("Rotation Z: \(rotationZ) rad/s")
+            Text("Pressure: \(pressure) hPa")
             Text("Steps: \(steps)")
             Text(sensorError)
         }
@@ -113,6 +125,7 @@ Direct hardware sensor coordinator.
 |---|---|---|---|
 | `accelerometerAvailable` | `Bool` | Read-only | Hardware accelerometer sensor presence check |
 | `gyroscopeAvailable` | `Bool` | Read-only | Hardware gyroscope sensor presence check |
+| `barometerAvailable` | `Bool` | Read-only | Hardware pressure sensor / Core Motion altimeter availability |
 | `pedometerAvailable` | `Bool` | Read-only | Hardware step counter coprocessor presence check |
 
 #### Methods
@@ -123,6 +136,8 @@ Direct hardware sensor coordinator.
 | `stopAccelerometer()` | `Void` | Suspends accelerometer sensor updates to conserve battery |
 | `startGyroscope(intervalMs: Int32)` | `async -> Void throws SensorError` | Starts gyroscope rotation sampling at specified interval |
 | `stopGyroscope()` | `Void` | Suspends gyroscope sensor updates |
+| `startBarometer(intervalMs: Int32)` | `async -> Void throws SensorError` | Starts pressure updates in hectopascals, throttled to at least the requested interval |
+| `stopBarometer()` | `Void` | Stops pressure updates and releases the altimeter listener |
 | `startPedometer()` | `async -> Void throws SensorError` | Initializes step counter and accumulates steps |
 | `stopPedometer()` | `Void` | Halts step counter updates |
 | `dispose()` | `Void` | Stops all active sensor listeners and unregisters OS delegates |
@@ -131,8 +146,9 @@ Direct hardware sensor coordinator.
 
 | Event | Payload | Description |
 |---|---|---|
-| `accelerometerChanged` | `reading: MotionReading` | Emits 3-axis linear acceleration values in $m/s^2$ |
+| `accelerometerChanged` | `reading: MotionReading` | Emits 3-axis acceleration values in $m/s^2$ |
 | `gyroscopeChanged` | `reading: MotionReading` | Emits 3-axis rotational velocity values in $rad/s$ |
+| `pressureChanged` | `reading: PressureReading` | Emits ambient pressure in hPa with a Unix timestamp |
 | `stepsChanged` | `reading: PedometerReading` | Emits cumulative steps taken during the active sensor session |
 
 ---
@@ -153,6 +169,12 @@ Direct hardware sensor coordinator.
 | `steps` | `Int64` | Accumulated step count |
 | `timestampUnixSeconds` | `Float64` | System sensor timestamp as Unix epoch seconds |
 
+#### `PressureReading`
+| Field | Type | Description |
+|---|---|---|
+| `hectopascals` | `Float64` | Ambient pressure in hPa. Core Motion's kPa reading is converted to hPa on iOS. |
+| `timestampUnixSeconds` | `Float64` | Sensor timestamp as Unix epoch seconds |
+
 ---
 
 ### Error Handling (`SensorError`)
@@ -161,7 +183,8 @@ Direct hardware sensor coordinator.
 |---|---|
 | `accelerometerUnavailable` | Device lacks accelerometer hardware |
 | `gyroscopeUnavailable` | Device lacks gyroscope hardware |
+| `barometerUnavailable` | Device lacks a pressure sensor or Core Motion altimeter |
 | `pedometerUnavailable` | Device lacks step counter hardware or coprocessor |
-| `permissionNotGranted` | Motion/fitness activity permission was denied by user |
-| `invalidInterval(intervalMs: Int32)` | Interval must be greater than zero |
+| `permissionNotGranted` | Motion, fitness activity, or altimeter permission was denied or restricted |
+| `invalidInterval(intervalMs: Int32)` | Sampling interval must be between 5 and 60,000 milliseconds |
 | `disposed` | Sensor handle was disposed |

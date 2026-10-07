@@ -81,7 +81,7 @@ Declarative native camera surface. Leaving composition automatically releases ca
 | `imageStreamEnabled` | `Bool` | `false` | Enables real-time raw frame delivery via `frameAvailable` |
 | `barcodeScanningEnabled` | `Bool` | `false` | Enables on-device computer vision barcode detection |
 | `barcodeFormat` | `CameraBarcodeFormat` | — | Target barcode symbology filter |
-| `frameResolution` | `CameraFrameResolution` | — | Resolution preset for video and frame streaming (`vga` or `hd`) |
+| `frameResolution` | `CameraFrameResolution` | — | Requested resolution for recording and frame streaming. Devices prefer a supported lower resolution, then a higher fallback if needed. |
 | `maxFramesPerSecond` | `Int32` | `10` | Frame rate throttle for `frameAvailable` events |
 
 #### Events
@@ -129,6 +129,8 @@ Declarative native camera surface. Leaving composition automatically releases ca
 |---|---:|---|
 | `vga` | 640 × 480 | Lower-bandwidth frame stream. |
 | `hd` | 1280 × 720 | Higher-detail frame stream. |
+| `fullHd` | 1920 × 1080 | Full HD capture and frame stream. |
+| `uhd4k` | 3840 × 2160 | 4K capture and frame stream where the device supports it; raw frames require substantial memory bandwidth, so pair this with a low `maxFramesPerSecond`. |
 
 #### `CameraBarcode`
 | Field | Type | Description |

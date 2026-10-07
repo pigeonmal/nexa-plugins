@@ -28,6 +28,9 @@ public class SensorsImpl : SensorsSpec, SensorEventListener {
     private var isGyroscopeRunning = false
 
     @Volatile
+    private var isBarometerRunning = false
+
+    @Volatile
     private var isPedometerRunning = false
 
     @Volatile
@@ -35,6 +38,9 @@ public class SensorsImpl : SensorsSpec, SensorEventListener {
 
     @Volatile
     private var pedometerSensor: Sensor? = null
+
+    @Volatile
+    private var barometerSensor: Sensor? = null
 
     @Volatile
     private var detectedSteps = 0L
@@ -46,6 +52,9 @@ public class SensorsImpl : SensorsSpec, SensorEventListener {
     override var onGyroscopeChanged: ((MotionReading) -> Unit)? = null
 
     @Volatile
+    override var onPressureChanged: ((PressureReading) -> Unit)? = null
+
+    @Volatile
     override var onStepsChanged: ((PedometerReading) -> Unit)? = null
 
     override val accelerometerAvailable: Boolean
@@ -53,6 +62,9 @@ public class SensorsImpl : SensorsSpec, SensorEventListener {
 
     override val gyroscopeAvailable: Boolean
         get() = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null
+
+    override val barometerAvailable: Boolean
+        get() = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE) != null
 
     override val pedometerAvailable: Boolean
         get() = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) != null ||
@@ -94,6 +106,26 @@ public class SensorsImpl : SensorsSpec, SensorEventListener {
         sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let {
             sensorManager.unregisterListener(this, it)
         }
+    }
+
+    override suspend fun startBarometer(intervalMs: Int) {
+        ensureActive()
+        validateInterval(intervalMs)
+        val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
+            ?: throw SensorError.barometerUnavailable
+        barometerSensor = sensor
+        isBarometerRunning = true
+        if (!sensorManager.registerListener(this, sensor, intervalMs * 1_000, mainHandler)) {
+            isBarometerRunning = false
+            barometerSensor = null
+            throw SensorError.barometerUnavailable
+        }
+    }
+
+    override fun stopBarometer() {
+        isBarometerRunning = false
+        barometerSensor?.let { sensorManager.unregisterListener(this, it) }
+        barometerSensor = null
     }
 
     override suspend fun startPedometer() {
@@ -147,6 +179,14 @@ public class SensorsImpl : SensorsSpec, SensorEventListener {
                     ),
                 )
             }
+            Sensor.TYPE_PRESSURE -> if (isBarometerRunning && event.values.isNotEmpty()) {
+                onPressureChanged?.invoke(
+                    PressureReading(
+                        hectopascals = event.values[0].toDouble(),
+                        timestampUnixSeconds = timestamp,
+                    ),
+                )
+            }
             Sensor.TYPE_STEP_COUNTER -> if (isPedometerRunning && event.values.isNotEmpty()) {
                 val currentSteps = event.values[0].toLong()
                 val baseline = pedometerBaseline ?: currentSteps.also { pedometerBaseline = it }
@@ -176,13 +216,16 @@ public class SensorsImpl : SensorsSpec, SensorEventListener {
         isDisposed = true
         isAccelerometerRunning = false
         isGyroscopeRunning = false
+        isBarometerRunning = false
         isPedometerRunning = false
         pedometerBaseline = null
         pedometerSensor = null
+        barometerSensor = null
         detectedSteps = 0L
         sensorManager.unregisterListener(this)
         onAccelerometerChanged = null
         onGyroscopeChanged = null
+        onPressureChanged = null
         onStepsChanged = null
     }
 

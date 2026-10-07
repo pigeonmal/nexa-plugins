@@ -350,7 +350,7 @@ private class CameraCaptureController(private val context: Context) {
                 val recorder = Recorder.Builder()
                     .setQualitySelector(
                         QualitySelector.from(
-                            Quality.HD,
+                            current.frameResolution.toVideoQuality(),
                             FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
                         ),
                     )
@@ -387,6 +387,8 @@ private class CameraCaptureController(private val context: Context) {
         val size = when (current.frameResolution) {
             CameraFrameResolution.vga -> android.util.Size(640, 480)
             CameraFrameResolution.hd -> android.util.Size(1280, 720)
+            CameraFrameResolution.fullHd -> android.util.Size(1920, 1080)
+            CameraFrameResolution.uhd4k -> android.util.Size(3840, 2160)
         }
         val aspectRatio = if (current.frameResolution == CameraFrameResolution.vga) {
             AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
@@ -643,6 +645,13 @@ private class CameraCaptureController(private val context: Context) {
         var retired: Boolean = false,
         var closed: Boolean = false,
     )
+}
+
+private fun CameraFrameResolution.toVideoQuality(): Quality = when (this) {
+    CameraFrameResolution.vga -> Quality.SD
+    CameraFrameResolution.hd -> Quality.HD
+    CameraFrameResolution.fullHd -> Quality.FHD
+    CameraFrameResolution.uhd4k -> Quality.UHD
 }
 
 private object CameraAnalysisExecutor {

@@ -4,6 +4,7 @@
 native component BrowserView {
     prop url: String
     prop javaScriptEnabled: Bool = false
+    prop offlineCacheEnabled: Bool = false
     prop allowedMessageOrigins: Array<String>
     prop message: String?
     event messageReceived(message: String)

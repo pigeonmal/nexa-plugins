@@ -4,6 +4,7 @@ app SensorsDemo {
     let sensors = Sensors()
     state accelerationX = 0.0
     state rotationZ = 0.0
+    state pressure: Float64 = 0.0
     state steps: Int64 = 0
     state sensorError = ""
 
@@ -15,6 +16,9 @@ app SensorsDemo {
             sensors.gyroscopeChanged { reading ->
                 rotationZ = reading.z
             }
+            sensors.pressureChanged { reading ->
+                pressure = reading.hectopascals
+            }
             sensors.stepsChanged { reading ->
                 steps = reading.steps
             }
@@ -22,12 +26,16 @@ app SensorsDemo {
             try {
                 await sensors.startAccelerometer(50)
                 await sensors.startGyroscope(50)
+                await sensors.startBarometer(100)
             } catch {
                 case Sensors.SensorError.accelerometerUnavailable {
                     sensorError = "Accelerometer unavailable"
                 }
                 case Sensors.SensorError.gyroscopeUnavailable {
                     sensorError = "Gyroscope unavailable"
+                }
+                case Sensors.SensorError.barometerUnavailable {
+                    sensorError = "Barometer unavailable"
                 }
                 case Sensors.SensorError.invalidInterval(intervalMs) {
                     sensorError = "Invalid sampling interval: \(intervalMs)"
@@ -68,6 +76,7 @@ app SensorsDemo {
         Column {
             Text("Acceleration X: \(accelerationX) m/s²")
             Text("Rotation Z: \(rotationZ) rad/s")
+            Text("Pressure: \(pressure) hPa")
             Text("Steps: \(steps)")
             Text(sensorError)
         }

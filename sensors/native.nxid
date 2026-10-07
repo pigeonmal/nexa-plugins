@@ -15,9 +15,16 @@ struct PedometerReading {
     timestampUnixSeconds: Float64
 }
 
+/// Ambient pressure shared in hectopascals on both platforms.
+struct PressureReading {
+    hectopascals: Float64
+    timestampUnixSeconds: Float64
+}
+
 error SensorError {
     accelerometerUnavailable
     gyroscopeUnavailable
+    barometerUnavailable
     pedometerUnavailable
     permissionNotGranted
     invalidInterval(intervalMs: Int32)
@@ -29,6 +36,7 @@ native class Sensors {
 
     readonly property accelerometerAvailable: Bool
     readonly property gyroscopeAvailable: Bool
+    readonly property barometerAvailable: Bool
     readonly property pedometerAvailable: Bool
 
     async fn startAccelerometer(intervalMs: Int32) throws SensorError
@@ -37,6 +45,9 @@ native class Sensors {
     async fn startGyroscope(intervalMs: Int32) throws SensorError
     fn stopGyroscope()
 
+    async fn startBarometer(intervalMs: Int32) throws SensorError
+    fn stopBarometer()
+
     async fn startPedometer() throws SensorError
     fn stopPedometer()
 
@@ -44,5 +55,6 @@ native class Sensors {
 
     event accelerometerChanged(reading: MotionReading)
     event gyroscopeChanged(reading: MotionReading)
+    event pressureChanged(reading: PressureReading)
     event stepsChanged(reading: PedometerReading)
 }

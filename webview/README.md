@@ -27,6 +27,7 @@ app WebViewDemo {
             WebView.BrowserView(
                 url: "https://example.com",
                 javaScriptEnabled: true,
+                offlineCacheEnabled: true,
                 allowedMessageOrigins: ["https://example.com"],
                 message: outgoingMessage,
             ).onMessageReceived { value ->
@@ -62,6 +63,7 @@ The component loads the requested URL. JavaScript messaging is origin-scoped: on
 |---|---|---|---|
 | `url` | `String` | required | URL loaded by the native web view. |
 | `javaScriptEnabled` | `Bool` | `false` | Enables page JavaScript and the messaging bridge. |
+| `offlineCacheEnabled` | `Bool` | `false` | Prefers cached responses before the network to support previously loaded content offline. Android uses `LOAD_CACHE_ELSE_NETWORK`; iOS uses `returnCacheDataElseLoad`. |
 | `allowedMessageOrigins` | `Array<String>` | required | Exact HTTPS origins allowed to exchange messages. |
 | `message` | `String?` | required | Optional host-to-page message. A changed value dispatches a `nexa-message` event on an allowed origin. |
 

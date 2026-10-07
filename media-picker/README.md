@@ -5,7 +5,7 @@
 
 Permissionless system photo and video picker for iOS and Android.
 
-Leverages Apple `PHPickerViewController` on iOS and AndroidX `ActivityResultContracts.PickVisualMedia` on Android. Runs out-of-process in system UI, eliminating the need to request intrusive `READ_MEDIA_IMAGES` or `NSPhotoLibraryUsageDescription` permissions.
+Leverages SwiftUI `PhotosPicker` on iOS and AndroidX `PickVisualMedia` / `PickMultipleVisualMedia` contracts on Android. Runs in system picker UI, eliminating the need to request `READ_MEDIA_IMAGES` or `NSPhotoLibraryUsageDescription` permissions.
 
 ---
 
@@ -17,30 +17,30 @@ Leverages Apple `PHPickerViewController` on iOS and AndroidX `ActivityResultCont
 plugin "plugins/media-picker" as MediaPicker
 
 app MediaPickerDemo {
-    state imageUri = ""
-    state videoUri = ""
+    state imageUris: Array<String> = []
+    state videoUris: Array<String> = []
     state errorMessage = ""
 
     body {
         Column {
-            MediaPicker.MediaPickerControl(isVideo: false) {
+            MediaPicker.MediaPickerControl(isVideo: false, selectionLimit: 8) {
                 Text("Choose image")
-            }.onPicked { uri ->
-                imageUri = uri
+            }.onPicked { uris ->
+                imageUris = uris
             }.onFailed { message ->
                 errorMessage = message
             }
 
-            MediaPicker.MediaPickerControl(isVideo: true) {
+            MediaPicker.MediaPickerControl(isVideo: true, selectionLimit: 1) {
                 Text("Choose video")
-            }.onPicked { uri ->
-                videoUri = uri
+            }.onPicked { uris ->
+                videoUris = uris
             }.onFailed { message ->
                 errorMessage = message
             }
 
-            Text(imageUri)
-            Text(videoUri)
+            Text("Selected images: \(imageUris.count)")
+            Text("Selected videos: \(videoUris.count)")
             Text(errorMessage)
         }
     }
@@ -61,13 +61,14 @@ Wraps any child component (`content`) and presents the native picker when tapped
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `isVideo` | `Bool` | **Required** | Filters the picker: `true` selects videos (`public.movie`), `false` selects photos (`public.image`). There is no default; the compiler rejects `MediaPickerControl` without it. |
+| `selectionLimit` | `Int32` | `0` | Maximum number of assets to select. `0` uses the platform picker default; `1` selects one asset; values above `1` cap multi-selection. Negative values fire `failed`. Older Android document-picker fallbacks may not enforce a positive cap. |
 
 #### Events
 
 | Event | Payload | Description |
 |---|---|---|
-| `picked` | `uri: String` | Fired when selection completes. Media is copied to the app cache directory and returns a local `file://` URI. |
-| `failed` | `message: String` | Fired when copying or presenting the selected media fails. Cancellation produces no selected URI. |
+| `picked` | `uris: Array<String>` | Fired when selection completes. Every selected asset is copied to the app cache directory and returned as a local `file://` URI in picker order. The source encoding and image metadata, including EXIF orientation, are retained for metadata-aware decoders. If any copy fails or the control leaves composition during copying, partial copies are removed and `failed` is fired for non-cancellation errors. |
+| `failed` | `message: String` | Fired when copying or presenting the selected media fails. Cancellation produces no selected URIs. |
 
 ---
 
@@ -75,5 +76,5 @@ Wraps any child component (`content`) and presents the native picker when tapped
 
 | Platform | Underlying API | Permission Invariant |
 |---|---|---|
-| **iOS** | `PHPickerViewController` | Requires **zero** Info.plist permissions; user grants access only to the selected asset |
-| **Android** | `PickVisualMedia` Activity Contract | System Photo Picker via Google Play Services / Android 13+; requires **no runtime permissions** |
+| **iOS** | SwiftUI `PhotosPicker` with `.current` encoding and `PhotosPickerItem` transfer loading | Requires **zero** Info.plist permissions; the user grants access only to the selected assets |
+| **Android** | `PickVisualMedia` for one asset; `PickMultipleVisualMedia` for multiple assets; copies original bytes | System Photo Picker when available, with AndroidX fallback; requires **no runtime permissions** |

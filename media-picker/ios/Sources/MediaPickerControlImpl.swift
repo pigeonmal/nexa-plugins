@@ -16,7 +16,7 @@ private struct PickedMedia: Transferable {
     }
 
     private static func importFile(_ source: URL) throws -> PickedMedia {
-        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("NexaMediaPicker", isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
@@ -29,25 +29,34 @@ private struct PickedMedia: Transferable {
         try FileManager.default.copyItem(at: source, to: destination)
         return PickedMedia(url: destination)
     }
+
+    func removeFromCache() throws {
+        try FileManager.default.removeItem(at: url)
+    }
 }
 
 /// Presents Apple's permissionless photo and video picker and returns a local file URI.
 public struct MediaPickerControlImpl<Content: View>: View {
     public let isVideo: Bool
-    public let onPicked: ((String) -> Void)?
+    public let selectionLimit: Int32
+    public let onPicked: (([String]) -> Void)?
     public let onFailed: ((String) -> Void)?
     public let content: Content
 
     @State private var isPresented = false
-    @State private var selection: PhotosPickerItem?
+    @State private var isImporting = false
+    @State private var selection: [PhotosPickerItem] = []
+    @State private var importTask: Task<Void, Never>?
 
     public init(
         isVideo: Bool,
-        onPicked: ((String) -> Void)?,
+        selectionLimit: Int32,
+        onPicked: (([String]) -> Void)?,
         onFailed: ((String) -> Void)?,
         content: Content
     ) {
         self.isVideo = isVideo
+        self.selectionLimit = selectionLimit
         self.onPicked = onPicked
         self.onFailed = onFailed
         self.content = content
@@ -55,6 +64,10 @@ public struct MediaPickerControlImpl<Content: View>: View {
 
     public var body: some View {
         Button {
+            guard selectionLimit >= 0 else {
+                onFailed?("selectionLimit must be zero or greater.")
+                return
+            }
             isPresented = true
         } label: {
             content
@@ -63,25 +76,47 @@ public struct MediaPickerControlImpl<Content: View>: View {
         .photosPicker(
             isPresented: $isPresented,
             selection: $selection,
-            matching: isVideo ? .videos : .images
+            maxSelectionCount: selectionLimit > 0 ? Int(selectionLimit) : nil,
+            matching: isVideo ? .videos : .images,
+            preferredItemEncoding: .current
         )
-        .onChange(of: selection) { item in
-            guard let item else { return }
-            Task { await importSelection(item) }
+        .onChange(of: selection) { items in
+            guard !items.isEmpty else { return }
+            importTask?.cancel()
+            isImporting = true
+            importTask = Task { await importSelection(items) }
         }
+        .onDisappear {
+            importTask?.cancel()
+        }
+        .disabled(isImporting)
     }
 
     @MainActor
-    private func importSelection(_ item: PhotosPickerItem) async {
+    private func importSelection(_ items: [PhotosPickerItem]) async {
+        var imported: [PickedMedia] = []
         do {
-            guard let media = try await item.loadTransferable(type: PickedMedia.self) else {
-                throw MediaPickerFailure.unreadableSelection
+            imported.reserveCapacity(items.count)
+            for item in items {
+                try Task.checkCancellation()
+                guard let media = try await item.loadTransferable(type: PickedMedia.self) else {
+                    throw MediaPickerFailure.unreadableSelection
+                }
+                imported.append(media)
             }
-            onPicked?(media.url.absoluteString)
+            try Task.checkCancellation()
+            onPicked?(imported.map { $0.url.absoluteString })
         } catch {
-            onFailed?(error.localizedDescription)
+            for media in imported {
+                try? media.removeFromCache()
+            }
+            if !Task.isCancelled {
+                onFailed?(error.localizedDescription)
+            }
         }
-        selection = nil
+        selection = []
+        isImporting = false
+        importTask = nil
     }
 }
 

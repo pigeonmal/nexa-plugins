@@ -56,7 +56,7 @@ public fun BiometricButtonImpl(
 
             try {
                 val prompt = BiometricPrompt.Builder(owner)
-                    .setTitle("Authenticate")
+                    .setTitle(title)
                     .setSubtitle(reason)
                     .setNegativeButton("Cancel", owner.mainExecutor) { _, _ -> }
                     .build()

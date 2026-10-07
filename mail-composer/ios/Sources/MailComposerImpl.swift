@@ -34,6 +34,52 @@ public final class MailComposerImpl: NSObject, MailComposerSpec, @preconcurrency
         presenter.present(composer, animated: true)
     }
 
+    public func presentWithAttachments(
+        _ recipients: [String],
+        _ subject: String,
+        _ body: String,
+        _ attachments: [MailAttachment]
+    ) async throws(MailComposerError) {
+        guard MFMailComposeViewController.canSendMail() else {
+            throw .unavailable
+        }
+        guard let presenter = Self.topViewController() else {
+            throw .presentationUnavailable
+        }
+
+        let attachmentFiles = attachments.map { ($0.uri, $0.mimeType, $0.fileName) }
+        let loadedAttachments = await Task.detached(priority: .userInitiated) {
+            attachmentFiles.map { uri, mimeType, fileName -> LoadedMailAttachment? in
+                guard !mimeType.isEmpty, !fileName.isEmpty,
+                      let url = URL(string: uri), url.isFileURL else {
+                    return nil
+                }
+                let hasSecurityScope = url.startAccessingSecurityScopedResource()
+                defer {
+                    if hasSecurityScope { url.stopAccessingSecurityScopedResource() }
+                }
+                guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+                    return nil
+                }
+                return LoadedMailAttachment(data: data, mimeType: mimeType, fileName: fileName)
+            }
+        }.value
+        guard loadedAttachments.count == attachments.count,
+              loadedAttachments.allSatisfy({ $0 != nil }) else {
+            throw .attachmentUnavailable
+        }
+
+        let composer = MFMailComposeViewController()
+        composer.setToRecipients(recipients)
+        composer.setSubject(subject)
+        composer.setMessageBody(body, isHTML: false)
+        loadedAttachments.compactMap { $0 }.forEach { attachment in
+            composer.addAttachmentData(attachment.data, mimeType: attachment.mimeType, fileName: attachment.fileName)
+        }
+        composer.mailComposeDelegate = self
+        presenter.present(composer, animated: true)
+    }
+
     public func mailComposeController(
         _ controller: MFMailComposeViewController,
         didFinishWith result: MFMailComposeResult,
@@ -64,4 +110,10 @@ public final class MailComposerImpl: NSObject, MailComposerSpec, @preconcurrency
         }
         return presenter
     }
+}
+
+private struct LoadedMailAttachment: Sendable {
+    let data: Data
+    let mimeType: String
+    let fileName: String
 }

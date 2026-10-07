@@ -153,7 +153,7 @@ native class MMKVStore {
     /// Fired when another process wrote to this store.
     event contentChanged()
 
-    /// Releases the store handle. The mapped file stays on disk; a later
-    /// `MMKVStore` with the same instance id reads it again.
+    /// Flushes pending writes and releases the store handle. The mapped file
+    /// stays on disk; a later `MMKVStore` with the same instance id reads it again.
     fn dispose()
 }

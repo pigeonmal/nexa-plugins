@@ -22,6 +22,7 @@ import java.util.Locale
 public fun BrowserViewImpl(
     url: String,
     javaScriptEnabled: Boolean,
+    offlineCacheEnabled: Boolean,
     allowedMessageOrigins: List<String>,
     message: String?,
     onMessageReceived: ((String) -> Unit)? = null,
@@ -39,8 +40,14 @@ public fun BrowserViewImpl(
         factory = { context ->
             NexaBrowserView(context).apply {
                 this.javascriptEnabled = javaScriptEnabled
+                this.offlineCacheEnabled = offlineCacheEnabled
                 lastObservedMessage = message
                 settings.javaScriptEnabled = javaScriptEnabled
+                settings.cacheMode = if (offlineCacheEnabled) {
+                    WebSettings.LOAD_CACHE_ELSE_NETWORK
+                } else {
+                    WebSettings.LOAD_DEFAULT
+                }
                 settings.domStorageEnabled = javaScriptEnabled
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
@@ -104,11 +111,18 @@ public fun BrowserViewImpl(
         },
         update = { view ->
             val jsChanged = view.javascriptEnabled != javaScriptEnabled
+            val cachePolicyChanged = view.offlineCacheEnabled != offlineCacheEnabled
             val messageChanged = view.lastObservedMessage != message
             view.javascriptEnabled = javaScriptEnabled
+            view.offlineCacheEnabled = offlineCacheEnabled
             view.lastObservedMessage = message
             if (messageChanged) view.lastSentMessage = null
             view.settings.javaScriptEnabled = javaScriptEnabled
+            view.settings.cacheMode = if (offlineCacheEnabled) {
+                WebSettings.LOAD_CACHE_ELSE_NETWORK
+            } else {
+                WebSettings.LOAD_DEFAULT
+            }
             view.settings.domStorageEnabled = javaScriptEnabled
 
             val originsChanged = setAllowedMessageOrigins(
@@ -118,7 +132,7 @@ public fun BrowserViewImpl(
                 onFailed = { error -> latestFailed.value?.invoke(error) },
             )
             if (jsChanged || originsChanged) view.lastSentMessage = null
-            if (view.requestedUrl != url || jsChanged || originsChanged) {
+            if (view.requestedUrl != url || jsChanged || originsChanged || cachePolicyChanged) {
                 loadHttpsUrl(view, url, latestFailed.value)
             }
 
@@ -140,6 +154,7 @@ public fun BrowserViewImpl(
 private class NexaBrowserView(context: Context) : WebView(context) {
     var requestedUrl: String? = null
     var javascriptEnabled = false
+    var offlineCacheEnabled = false
     var pageLoaded = false
     var lastSentMessage: String? = null
     var lastObservedMessage: String? = null

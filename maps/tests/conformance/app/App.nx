@@ -8,11 +8,18 @@ app MapsConformance {
             Maps.MapView(
                 centerLatitude: 48.8584,
                 centerLongitude: 2.2945,
+                markerColor: "#7B1FA2",
                 pins: [
                     Maps.MapPin("eiffel", "Eiffel Tower", 48.8584, 2.2945),
                     Maps.MapPin("louvre", "The Louvre", 48.8606, 2.3376),
                     Maps.MapPin("notre-dame", "Notre-Dame", 48.8530, 2.3499),
                 ],
+                route: [
+                    Maps.MapCoordinate(48.8584, 2.2945),
+                    Maps.MapCoordinate(48.8606, 2.3376),
+                    Maps.MapCoordinate(48.8530, 2.3499),
+                ],
+                routeColor: "#1565C0",
             ).onPinSelected { id ->
                 selectedPin = id
                 Log.info(message: "MAP_PIN_SELECTED:\(id)")

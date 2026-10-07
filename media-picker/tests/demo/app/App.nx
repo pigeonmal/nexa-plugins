@@ -1,30 +1,30 @@
 plugin "../../../" as MediaPicker
 
 app MediaPickerDemo {
-    state imageUri = ""
-    state videoUri = ""
+    state imageUris: Array<String> = []
+    state videoUris: Array<String> = []
     state errorMessage = ""
 
     body {
         Column {
-            MediaPicker.MediaPickerControl(isVideo: false) {
+            MediaPicker.MediaPickerControl(isVideo: false, selectionLimit: 8) {
                 Text("Choose image")
-            }.onPicked { uri ->
-                imageUri = uri
+            }.onPicked { uris ->
+                imageUris = uris
             }.onFailed { message ->
                 errorMessage = message
             }
 
-            MediaPicker.MediaPickerControl(isVideo: true) {
+            MediaPicker.MediaPickerControl(isVideo: true, selectionLimit: 1) {
                 Text("Choose video")
-            }.onPicked { uri ->
-                videoUri = uri
+            }.onPicked { uris ->
+                videoUris = uris
             }.onFailed { message ->
                 errorMessage = message
             }
 
-            Text(imageUri)
-            Text(videoUri)
+            Text("Selected images: \(imageUris.count)")
+            Text("Selected videos: \(videoUris.count)")
             Text(errorMessage)
         }
     }

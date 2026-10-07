@@ -1,6 +1,6 @@
 {
   "version": 1,
   "plugins": [
-    {"alias":"SQLite","id":"dev.nexa.sqlite","source":"path:../../..","revision":null,"package":null,"contentHash":"09eec5870eb20cc6"}
+    {"alias":"SQLite","id":"dev.nexa.sqlite","source":"path:../../..","revision":null,"package":null,"contentHash":"f9e176ed80099bd6"}
   ]
 }

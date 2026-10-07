@@ -5,7 +5,7 @@
 
 Secure biometric authentication for iOS and Android.
 
-Backed by Apple `LocalAuthentication` (Face ID / Touch ID) on iOS and AndroidX `BiometricPrompt` on Android.
+Backed by Apple `LocalAuthentication` (Face ID / Touch ID) on iOS and the Android platform `BiometricPrompt` on Android.
 
 ---
 
@@ -59,8 +59,8 @@ User-triggered native authentication control. Initiating authentication requires
 
 | Prop | Type | Description |
 |---|---|---|
-| `title` | `String` | Visual label displayed on the trigger button |
-| `reason` | `String` | System dialog subtitle explaining why the biometric check is requested |
+| `title` | `String` | Trigger button label; Android also uses it as the system prompt title. iOS displays its app name in the system prompt. |
+| `reason` | `String` | Explanation shown by the native authentication prompt |
 
 #### Events
 

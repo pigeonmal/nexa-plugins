@@ -1,5 +1,8 @@
 package dev.nexa.mmkv
 
+import android.content.ComponentCallbacks2
+import android.content.Context
+import android.content.res.Configuration
 import com.tencent.mmkv.MMKV
 import com.tencent.mmkv.MMKVHandler
 import com.tencent.mmkv.MMKVLogLevel
@@ -8,6 +11,7 @@ import dev.nexa.core.NexaRuntimeCore
 import dev.nexa.core.NexaValueReadResult
 import dev.nexa.core.NexaValueReader
 import dev.nexa.core.NexaValueWriter
+import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -37,6 +41,8 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     @Volatile
     private var compareBeforeSetForUnencryptedStore = true
     private val store: MMKV?
+    private lateinit var applicationContext: Context
+    private var backgroundSyncCallback: MMKVBackgroundSyncCallback? = null
     @Volatile
     private var observedKeys: MutableSet<String>? = null
     private var isDisposed = false
@@ -45,6 +51,7 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         this.instanceID = instanceID
         this.cryptKey = cryptKey
         this.isMultiProcess = multiProcess
+        applicationContext = NexaRuntimeCore.context().applicationContext
 
         // MMKV.initialize loads its native library. Registering the handler
         // through initialization enables content notifications without a
@@ -77,6 +84,9 @@ public class MMKVStoreImpl : MMKVStoreSpec {
             // process-wide observer registry.
             MMKVStoreObserver.register(this)
         }
+        val callback = MMKVBackgroundSyncCallback(this)
+        backgroundSyncCallback = callback
+        applicationContext.registerComponentCallbacks(callback)
     }
 
     // MARK: - Scalars
@@ -360,13 +370,20 @@ public class MMKVStoreImpl : MMKVStoreSpec {
             return
         }
         isDisposed = true
+        backgroundSyncCallback?.let(applicationContext::unregisterComponentCallbacks)
+        backgroundSyncCallback = null
         if (isMultiProcess) {
             MMKVStoreObserver.unregister(this)
         }
         onValueChanged = null
         onContentChanged = null
         observedKeySet(create = false)?.clear()
+        store?.sync()
         store?.close()
+    }
+
+    internal fun flushOnBackground() {
+        if (!isDisposed) store?.sync()
     }
 
     // MARK: - Internals
@@ -451,24 +468,51 @@ public class MMKVStoreImpl : MMKVStoreSpec {
     }
 }
 
+/** Flushes a live MMKV handle when Android hides the app UI without retaining it. */
+private class MMKVBackgroundSyncCallback(owner: MMKVStoreImpl) : ComponentCallbacks2 {
+    private val owner = WeakReference(owner)
+
+    override fun onTrimMemory(level: Int) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            owner.get()?.flushOnBackground()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+    override fun onLowMemory() = Unit
+}
+
 /**
  * Routes MMKV's process-global notifications to the live stores. MMKV calls
  * back on its own thread, so the store callback is dispatched to the main
  * thread the way the generated iOS contract does.
  */
 internal object MMKVStoreObserver : MMKVHandler {
-    private val stores = ConcurrentHashMap<String, MMKVStoreImpl>()
+    private val stores = ConcurrentHashMap<String, WeakReference<MMKVStoreImpl>>()
 
     fun register(store: MMKVStoreImpl) {
-        stores[store.instanceID] = store
+        stores.forEach { (instanceID, reference) ->
+            if (reference.get() == null) stores.remove(instanceID, reference)
+        }
+        stores[store.instanceID] = WeakReference(store)
     }
 
     fun unregister(store: MMKVStoreImpl) {
-        stores.remove(store.instanceID, store)
+        stores[store.instanceID]?.let { reference ->
+            if (reference.get() === store || reference.get() == null) {
+                stores.remove(store.instanceID, reference)
+            }
+        }
     }
 
     override fun onContentChangedByOuterProcess(mmapID: String) {
-        val store = stores[mmapID] ?: return
+        val reference = stores[mmapID] ?: return
+        val store = reference.get()
+        if (store == null) {
+            stores.remove(mmapID, reference)
+            return
+        }
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             store.reportOuterProcessChange()
         }

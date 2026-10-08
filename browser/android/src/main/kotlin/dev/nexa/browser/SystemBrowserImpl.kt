@@ -26,9 +26,6 @@ public class SystemBrowserImpl : SystemBrowserSpec {
                 CustomTabsIntent.Builder().build().launchUrl(activity, uri)
             } else {
                 val intent = Intent(Intent.ACTION_VIEW, uri)
-                if (intent.resolveActivity(activity.packageManager) == null) {
-                    throw BrowserError.unavailable
-                }
                 activity.startActivity(intent)
             }
         } catch (_: ActivityNotFoundException) {

@@ -444,7 +444,6 @@ public final class MMKVStoreImpl: MMKVStoreSpec {
     /// tells us the instance id, never the key, so every observed key of that
     /// store is reported.
     fileprivate func reportOuterProcessChange() {
-        guard !observedKeys.isEmpty else { return }
         notifyAll()
         onContentChanged?()
     }
@@ -461,26 +460,53 @@ final class MMKVStoreObserver: NSObject, MMKVHandler, @unchecked Sendable {
     static let shared = MMKVStoreObserver()
 
     private let lock = NSLock()
-    private var stores: [String: Weak<MMKVStoreImpl>] = [:]
+    private var stores: [String: [Weak<MMKVStoreImpl>]] = [:]
 
     func register(_ store: MMKVStoreImpl) {
         lock.withLock {
-            stores[store.instanceID] = Weak(store)
-            stores = stores.filter { $0.value.value != nil }
+            for instanceID in Array(stores.keys) {
+                let liveReferences = stores[instanceID]?.filter { $0.value != nil } ?? []
+                if liveReferences.isEmpty {
+                    stores.removeValue(forKey: instanceID)
+                } else {
+                    stores[instanceID] = liveReferences
+                }
+            }
+            var references = stores[store.instanceID] ?? []
+            references.removeAll { $0.value === store }
+            references.append(Weak(store))
+            stores[store.instanceID] = references
         }
     }
 
     func unregister(_ store: MMKVStoreImpl) {
-        _ = lock.withLock {
-            stores.removeValue(forKey: store.instanceID)
+        lock.withLock {
+            var references = stores[store.instanceID] ?? []
+            references.removeAll { $0.value == nil || $0.value === store }
+            if references.isEmpty {
+                stores.removeValue(forKey: store.instanceID)
+            } else {
+                stores[store.instanceID] = references
+            }
         }
     }
 
     func onMMKVContentChange(_ mmapID: String) {
-        let store = lock.withLock { stores[mmapID]?.value }
-        guard let store else { return }
-        Task { @MainActor in
-            store.reportOuterProcessChange()
+        let liveStores: [MMKVStoreImpl] = lock.withLock {
+            let references = stores[mmapID] ?? []
+            let live = references.compactMap { $0.value }
+            let liveReferences = references.filter { $0.value != nil }
+            if liveReferences.isEmpty {
+                stores.removeValue(forKey: mmapID)
+            } else {
+                stores[mmapID] = liveReferences
+            }
+            return live
+        }
+        for store in liveStores {
+            Task { @MainActor in
+                store.reportOuterProcessChange()
+            }
         }
     }
 }

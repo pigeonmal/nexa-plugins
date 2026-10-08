@@ -441,9 +441,6 @@ public class MMKVStoreImpl : MMKVStoreSpec {
      * store is reported.
      */
     internal fun reportOuterProcessChange() {
-        if (observedKeySet(create = false)?.isNotEmpty() != true) {
-            return
-        }
         notifyObservedKeys()
         onContentChanged?.invoke()
     }
@@ -489,32 +486,47 @@ private class MMKVBackgroundSyncCallback(owner: MMKVStoreImpl) : ComponentCallba
  * thread the way the generated iOS contract does.
  */
 internal object MMKVStoreObserver : MMKVHandler {
-    private val stores = ConcurrentHashMap<String, WeakReference<MMKVStoreImpl>>()
+    private val lock = Any()
+    private val stores = HashMap<String, MutableList<WeakReference<MMKVStoreImpl>>>()
 
     fun register(store: MMKVStoreImpl) {
-        stores.forEach { (instanceID, reference) ->
-            if (reference.get() == null) stores.remove(instanceID, reference)
-        }
-        stores[store.instanceID] = WeakReference(store)
-    }
-
-    fun unregister(store: MMKVStoreImpl) {
-        stores[store.instanceID]?.let { reference ->
-            if (reference.get() === store || reference.get() == null) {
-                stores.remove(store.instanceID, reference)
+        synchronized(lock) {
+            val entries = stores.entries.iterator()
+            while (entries.hasNext()) {
+                val entry = entries.next()
+                entry.value.removeAll { it.get() == null }
+                if (entry.value.isEmpty()) entries.remove()
+            }
+            val references = stores.getOrPut(store.instanceID) { mutableListOf() }
+            if (references.none { it.get() === store }) {
+                references.add(WeakReference(store))
             }
         }
     }
 
-    override fun onContentChangedByOuterProcess(mmapID: String) {
-        val reference = stores[mmapID] ?: return
-        val store = reference.get()
-        if (store == null) {
-            stores.remove(mmapID, reference)
-            return
+    fun unregister(store: MMKVStoreImpl) {
+        synchronized(lock) {
+            val references = stores[store.instanceID] ?: return@synchronized
+            references.removeAll { reference ->
+                val owner = reference.get()
+                owner == null || owner === store
+            }
+            if (references.isEmpty()) stores.remove(store.instanceID)
         }
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            store.reportOuterProcessChange()
+    }
+
+    override fun onContentChangedByOuterProcess(mmapID: String) {
+        val liveStores = synchronized(lock) {
+            val references = stores[mmapID] ?: return@synchronized emptyList()
+            val live = references.mapNotNull { it.get() }
+            references.removeAll { it.get() == null }
+            if (references.isEmpty()) stores.remove(mmapID)
+            live
+        }
+        if (liveStores.isNotEmpty()) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                liveStores.forEach { it.reportOuterProcessChange() }
+            }
         }
     }
 

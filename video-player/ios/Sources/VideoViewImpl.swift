@@ -7,32 +7,38 @@ import UIKit
 /// Native visual implementation used by the generated `VideoView` wrapper.
 public struct VideoViewImpl<Content: View>: View {
     public let player: VideoPlayer
+    @ObservedObject private var playerModel: VideoPlayerImpl
     public let controls: Bool
+    public let onFirstFrame: ((String) -> Void)?
     public let content: Content
 
     init(
         player: VideoPlayer,
         controls: Bool,
         softwareDecodingEnabled _: Bool,
+        onFirstFrame: ((String) -> Void)?,
         content: Content
     ) {
         self.player = player
+        self._playerModel = ObservedObject(wrappedValue: player)
         self.controls = controls
+        self.onFirstFrame = onFirstFrame
         self.content = content
     }
 
     public var body: some View {
         ZStack {
-            if let player = player.player {
-                VideoPlayerLayerHost(player: player)
+            if let player = playerModel.player {
+                VideoPlayerLayerHost(player: player, onFirstFrame: onFirstFrame)
             } else {
                 Color.black
             }
-            if controls, let player = player.player {
+            if controls, let player = playerModel.player {
                 VideoPlayerControlsOverlay(player: player)
             }
             content
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
     }
 }
@@ -40,30 +46,64 @@ public struct VideoViewImpl<Content: View>: View {
 private final class VideoPlayerLayerView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
 
+    private var readinessObservation: NSKeyValueObservation?
+    private var onFirstFrame: ((String) -> Void)?
+
     var playerLayer: AVPlayerLayer? { layer as? AVPlayerLayer }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isOpaque = false
+        backgroundColor = .clear
         playerLayer?.videoGravity = .resizeAspectFill
+        playerLayer?.backgroundColor = UIColor.clear.cgColor
+        playerLayer?.isOpaque = false
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        isUserInteractionEnabled = false
+        isOpaque = false
+        backgroundColor = .clear
         playerLayer?.videoGravity = .resizeAspectFill
+        playerLayer?.backgroundColor = UIColor.clear.cgColor
+        playerLayer?.isOpaque = false
+    }
+
+    func bind(_ player: AVPlayer, onFirstFrame: ((String) -> Void)?) {
+        self.onFirstFrame = onFirstFrame
+        guard playerLayer?.player !== player || readinessObservation == nil else { return }
+        readinessObservation = nil
+        playerLayer?.player = player
+        playerLayer?.opacity = 0
+        readinessObservation = playerLayer?.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, let playerLayer = self.playerLayer else { return }
+                playerLayer.opacity = playerLayer.isReadyForDisplay ? 1 : 0
+                guard playerLayer.isReadyForDisplay,
+                      let asset = playerLayer.player?.currentItem?.asset as? AVURLAsset
+                else {
+                    return
+                }
+                self.onFirstFrame?(asset.url.absoluteString)
+            }
+        }
     }
 }
 
 private struct VideoPlayerLayerHost: UIViewRepresentable {
     let player: AVPlayer
+    let onFirstFrame: ((String) -> Void)?
 
     func makeUIView(context: Context) -> VideoPlayerLayerView {
         let view = VideoPlayerLayerView()
-        view.playerLayer?.player = player
+        view.bind(player, onFirstFrame: onFirstFrame)
         return view
     }
 
     func updateUIView(_ view: VideoPlayerLayerView, context: Context) {
-        view.playerLayer?.player = player
+        view.bind(player, onFirstFrame: onFirstFrame)
     }
 }
 

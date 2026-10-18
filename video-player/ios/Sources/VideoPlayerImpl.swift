@@ -1,5 +1,30 @@
 import AVFoundation
+import Combine
 import Foundation
+
+private func normalizedVideoURL(_ value: String) -> URL? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if trimmed.hasPrefix("/") {
+        return URL(fileURLWithPath: trimmed).standardizedFileURL
+    }
+
+    guard let url = URL(string: trimmed),
+          let scheme = url.scheme?.lowercased()
+    else {
+        return nil
+    }
+
+    switch scheme {
+    case "http", "https":
+        return url.host?.isEmpty == false ? url : nil
+    case "file":
+        return url.isFileURL && !url.path.isEmpty ? url.standardizedFileURL : nil
+    default:
+        return nil
+    }
+}
 
 @MainActor
 protocol VideoPlayerEngine: AnyObject {
@@ -40,12 +65,6 @@ private final class AVPlayerEngine: VideoPlayerEngine {
         let key = url.absoluteString
         let warmPlayer = preloadedPlayers.removeValue(forKey: key)
         let item = warmPlayer?.currentItem ?? AVPlayerItem(url: url)
-        let mediaDuration: CMTime
-        do {
-            mediaDuration = try await item.asset.load(.duration)
-        } catch {
-            throw PlayerError.decodingFailed(message: error.localizedDescription)
-        }
 
         removeEndedObserver()
         let activePlayer = warmPlayer ?? self.player ?? AVPlayer()
@@ -81,26 +100,27 @@ private final class AVPlayerEngine: VideoPlayerEngine {
                 self?.onEnded?()
             }
         }
-        return mediaDuration.seconds
+        let duration = item.duration.seconds
+        return duration.isFinite && duration > 0 ? duration : 0
     }
 
     func preload(url: String, index: Int32) {
         guard index >= currentPreloadPosition + 1,
               index <= currentPreloadPosition + 2,
-              preloadedPlayers[url] == nil,
-              let candidateURL = URL(string: url),
-              candidateURL.scheme == "https" || candidateURL.scheme == "http"
+              let candidateURL = normalizedVideoURL(url)
         else {
             return
         }
 
+        let key = candidateURL.absoluteString
+        guard preloadedPlayers[key] == nil else { return }
         let item = AVPlayerItem(url: candidateURL)
         item.preferredForwardBufferDuration = 1.5
         let candidate = AVPlayer(playerItem: item)
         candidate.isMuted = true
         candidate.automaticallyWaitsToMinimizeStalling = true
-        preloadedPlayers[url] = candidate
-        preloadedIndexes[url] = index
+        preloadedPlayers[key] = candidate
+        preloadedIndexes[key] = index
         let observer = candidate.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
             queue: .main
@@ -114,10 +134,10 @@ private final class AVPlayerEngine: VideoPlayerEngine {
             candidate.pause()
             candidate.seek(to: .zero)
             Task { @MainActor [weak self] in
-                self?.removePreloadObserver(for: url)
+                self?.removePreloadObserver(for: key)
             }
         }
-        preloadObservers[url] = (candidate, observer)
+        preloadObservers[key] = (candidate, observer)
         candidate.play()
     }
 
@@ -178,9 +198,9 @@ private final class AVPlayerEngine: VideoPlayerEngine {
 }
 
 @MainActor
-public final class VideoPlayerImpl: VideoPlayerSpec {
-    public private(set) var state: PlayerState = .idle
-    public private(set) var duration: Double = 0
+public final class VideoPlayerImpl: VideoPlayerSpec, ObservableObject {
+    @Published public private(set) var state: PlayerState = .idle
+    @Published public private(set) var duration: Double = 0
     public var volume: Double {
         didSet { engine.volume = volume }
     }
@@ -190,6 +210,7 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
     var player: AVPlayer? { engine.player }
     private var engine: any VideoPlayerEngine
     private var prepareGeneration: UInt64 = 0
+    private var durationTask: Task<Void, Never>?
     private var isDisposed = false
     private var preparedURL: String?
 
@@ -210,9 +231,7 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
             state = .failed
             throw PlayerError.decodingFailed(message: "VideoPlayer has been disposed")
         }
-        guard let url = URL(string: url),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
+        guard let url = normalizedVideoURL(url) else {
             state = .failed
             throw PlayerError.invalidUrl
         }
@@ -221,12 +240,25 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
             return
         }
         state = .preparing
+        durationTask?.cancel()
+        duration = 0
         do {
             let preparedDuration = try await engine.prepare(url: url)
             guard generation == prepareGeneration else { return }
             preparedURL = url.absoluteString
             duration = preparedDuration
             state = .ready
+            if let asset = engine.player?.currentItem?.asset {
+                durationTask = Task { @MainActor [weak self] in
+                    do {
+                        let loadedDuration = try await asset.load(.duration).seconds
+                        guard let self, generation == self.prepareGeneration else { return }
+                        self.duration = loadedDuration.isFinite && loadedDuration > 0 ? loadedDuration : 0
+                    } catch {
+                        // AVPlayer can begin rendering while duration metadata is still unavailable.
+                    }
+                }
+            }
         } catch {
             if generation == prepareGeneration {
                 preparedURL = nil
@@ -279,6 +311,8 @@ public final class VideoPlayerImpl: VideoPlayerSpec {
         guard !isDisposed else { return }
         isDisposed = true
         prepareGeneration &+= 1
+        durationTask?.cancel()
+        durationTask = nil
         preparedURL = nil
         onEnded = nil
         engine.onEnded = nil

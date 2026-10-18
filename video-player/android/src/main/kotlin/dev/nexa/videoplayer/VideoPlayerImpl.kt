@@ -4,8 +4,8 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
-import android.graphics.Rect
 import android.graphics.Color
+import android.graphics.Rect
 import android.os.Build
 import android.util.Rational
 import android.view.View
@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -48,13 +49,31 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import org.chromium.net.CronetEngine
 import java.io.File
 import java.net.URI
-import java.util.WeakHashMap
 import java.util.LinkedHashMap
+import java.util.WeakHashMap
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+internal fun normalizedVideoSource(value: String): String? {
+    val trimmed = value.trim()
+    if (trimmed.isEmpty()) return null
+
+    val parsed = runCatching { URI(trimmed).normalize() }.getOrNull()
+    return when (parsed?.scheme?.lowercase()) {
+        "http", "https" -> parsed.takeIf { !it.host.isNullOrBlank() }?.toASCIIString()
+        "file" -> parsed.path
+            ?.takeIf { it.startsWith("/") }
+            ?.let { File(it).toURI().normalize().toASCIIString() }
+        null -> {
+            val file = File(trimmed)
+            if (file.isAbsolute) file.toURI().normalize().toASCIIString() else null
+        }
+        else -> null
+    }
+}
 
 @OptIn(UnstableApi::class)
 public class VideoPlayerImpl : VideoPlayerSpec {
@@ -171,8 +190,8 @@ public class VideoPlayerImpl : VideoPlayerSpec {
 
     public override suspend fun prepare(url: String) {
         prepareMutex.withLock {
-            val scheme = runCatching { URI(url).scheme?.lowercase() }.getOrNull()
-            if (scheme != "http" && scheme != "https") {
+            val normalizedUrl = normalizedVideoSource(url)
+            if (normalizedUrl == null) {
                 state = PlayerState.failed
                 throw PlayerError.invalidUrl
             }
@@ -180,7 +199,7 @@ public class VideoPlayerImpl : VideoPlayerSpec {
                 state = PlayerState.failed
                 throw PlayerError.decodingFailed("VideoView has not attached a player context")
             }
-            if (preparedUrl == url && (
+            if (preparedUrl == normalizedUrl && (
                     state == PlayerState.ready || state == PlayerState.paused || state == PlayerState.playing
                 )
             ) {
@@ -189,10 +208,10 @@ public class VideoPlayerImpl : VideoPlayerSpec {
 
             state = PlayerState.preparing
             try {
-                val item = preloadedItems[url]?.item ?: MediaItem.fromUri(url)
+                val item = preloadedItems[normalizedUrl]?.item ?: MediaItem.fromUri(normalizedUrl)
                 val mediaSource = preloadManager?.getMediaSource(item)
-                playerEngine.prepare(url, mediaSource)
-                preparedUrl = url
+                playerEngine.prepare(normalizedUrl, mediaSource)
+                preparedUrl = normalizedUrl
             } catch (error: PlayerError) {
                 preparedUrl = null
                 state = PlayerState.failed
@@ -202,18 +221,16 @@ public class VideoPlayerImpl : VideoPlayerSpec {
     }
 
     public override fun preload(url: String, index: Int) {
-        if (runCatching { URI(url).scheme?.lowercase() }.getOrNull() !in setOf("http", "https")) {
-            return
-        }
+        val normalizedUrl = normalizedVideoSource(url) ?: return
         val manager = preloadManager ?: return
         val normalizedIndex = index.coerceAtLeast(0)
         if (normalizedIndex !in (currentPreloadPosition + 1)..(currentPreloadPosition + 2)) return
-        val existing = preloadedItems[url]
+        val existing = preloadedItems[normalizedUrl]
         if (existing?.index == normalizedIndex) return
         if (existing != null) manager.remove(existing.item)
 
-        val item = MediaItem.fromUri(url)
-        preloadedItems[url] = PreloadedVideo(item, normalizedIndex)
+        val item = MediaItem.fromUri(normalizedUrl)
+        preloadedItems[normalizedUrl] = PreloadedVideo(item, normalizedIndex)
         manager.add(item, normalizedIndex)
         manager.invalidate()
     }
@@ -448,10 +465,21 @@ public fun VideoViewImpl(
     player: VideoPlayer,
     controls: Boolean,
     softwareDecodingEnabled: Boolean,
+    onFirstFrame: ((String) -> Unit)?,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findComponentActivity() }
+    val firstFrameCallback = rememberUpdatedState(onFirstFrame)
+    val firstFrameListener = remember(player) {
+        object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                val url = player.nativePlayer?.currentMediaItem?.localConfiguration?.uri?.toString()
+                    ?: return
+                firstFrameCallback.value?.invoke(url)
+            }
+        }
+    }
     val pictureInPicture = remember(player) {
         mutableStateOf(activity?.isInPictureInPictureMode == true)
     }
@@ -460,6 +488,7 @@ public fun VideoViewImpl(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 player.attachContext(context, softwareDecodingEnabled)
+                player.nativePlayer?.addListener(firstFrameListener)
                 (player.acquirePlayerView(context) as NexaPlayerView).apply {
                     useController = controls
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -487,6 +516,7 @@ public fun VideoViewImpl(
                 view.player = player.nativePlayer
             },
             onRelease = { view ->
+                player.nativePlayer?.removeListener(firstFrameListener)
                 view.pipRegistration?.let { view.pipOwner?.detachPictureInPictureBinding(it) }
                 view.pipRegistration = null
                 view.pipOwner = null

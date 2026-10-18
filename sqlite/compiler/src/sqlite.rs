@@ -2059,6 +2059,26 @@ fn inspect_nodes(
                             inspect_nodes(&tab.children, environment, inspect, structs)?;
                         }
                     }
+                    ast::ChildBody::AppBottomBar { tabs, custom_bar } => {
+                        for tab in tabs {
+                            for expression in [
+                                Some(&tab.index),
+                                Some(&tab.label),
+                                tab.icon.as_ref(),
+                                tab.badge.as_ref(),
+                                tab.role.as_ref(),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            {
+                                inspect_expression_calls(expression, environment, inspect)?;
+                            }
+                            inspect_nodes(&tab.children, environment, inspect, structs)?;
+                        }
+                        if let Some(custom_bar) = custom_bar {
+                            inspect_nodes(custom_bar, environment, inspect, structs)?;
+                        }
+                    }
                     ast::ChildBody::SplitPanes { sidebar, detail } => {
                         inspect_nodes(sidebar, environment, inspect, structs)?;
                         inspect_nodes(detail, environment, inspect, structs)?;

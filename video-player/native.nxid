@@ -42,4 +42,5 @@ native component VideoView {
     prop player: VideoPlayer
     prop controls: Bool = true
     prop softwareDecodingEnabled: Bool = true
+    event firstFrame(url: String)
 }

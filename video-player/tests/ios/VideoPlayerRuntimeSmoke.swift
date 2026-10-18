@@ -103,6 +103,20 @@ struct VideoPlayerRuntimeSmoke {
         firstEngine.finish()
         precondition(first.state == .ended && firstEnded == 1 && secondEnded == 0)
 
+        let localFileURL = URL(fileURLWithPath: "/tmp/nexa-video-player-smoke-uri.mp4")
+        try await first.prepare(localFileURL.absoluteString)
+        try await first.prepare("/tmp/nexa-video-player-smoke-path.mp4")
+        precondition(firstEngine.preparedURLs.suffix(2).map(\.absoluteString) == [
+            localFileURL.standardizedFileURL.absoluteString,
+            URL(fileURLWithPath: "/tmp/nexa-video-player-smoke-path.mp4").standardizedFileURL.absoluteString,
+        ])
+        do {
+            try await first.prepare("content://media/external/video/1")
+            preconditionFailure("Unsupported content URIs must be rejected")
+        } catch PlayerError.invalidUrl {
+            // MediaPicker emits a copied file:// URI, while other schemes are unsupported.
+        }
+
         first.dispose()
         first.dispose()
         precondition(first.state == .idle && firstEngine.disposeCount == 1)

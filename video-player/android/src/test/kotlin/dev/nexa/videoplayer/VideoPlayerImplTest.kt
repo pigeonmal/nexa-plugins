@@ -2,11 +2,26 @@ package dev.nexa.videoplayer
 
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 public class VideoPlayerImplTest {
+    @Test
+    public fun mediaUriNormalizationAcceptsNetworkAndPickerFiles() {
+        assertEquals("https://media.example/clip.mp4", normalizedVideoSource("https://media.example/clip.mp4"))
+        assertEquals("file:///data/user/0/app/cache/clip.mp4", normalizedVideoSource("file:///data/user/0/app/cache/clip.mp4"))
+        assertEquals(File("/data/user/0/app/cache/clip.mp4").toURI().toString(), normalizedVideoSource("/data/user/0/app/cache/clip.mp4"))
+    }
+
+    @Test
+    public fun mediaUriNormalizationRejectsUnsupportedOrRelativeSources() {
+        assertNull(normalizedVideoSource("content://media/external/video/1"))
+        assertNull(normalizedVideoSource("relative/clip.mp4"))
+        assertNull(normalizedVideoSource("https:///clip.mp4"))
+    }
+
     @Test
     public fun twoPlayersPrepareAndDisposeIndependently() = runBlocking {
         val firstEngine = FakeVideoPlayerEngine(durationSeconds = 12.0)

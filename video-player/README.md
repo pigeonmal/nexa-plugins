@@ -142,7 +142,7 @@ Controls media decoding, playback state, and forward preloading queues; call `di
 
 | Method | Return Type | Description |
 |---|---|---|
-| `prepare(url: String)` | `async -> Void throws PlayerError` | Initializes the video pipeline from a URL or local file path. |
+| `prepare(url: String)` | `async -> Void throws PlayerError` | Attaches the video item to the player. Playback can start while remote duration metadata finishes loading; `duration` updates when that metadata becomes available. |
 | `preload(url: String, index: Int32)` | `Void` | Buffers subsequent video into forward cache queue at specific index |
 | `setPreloadPosition(index: Int32)` | `Void` | Advances active playback queue to preloaded index |
 | `play()` | `Void` | Starts or resumes video rendering |
@@ -170,6 +170,12 @@ Visual display surface hosting the native video render layer.
 | `player` | `VideoPlayer` | — | Required player instance binding |
 | `controls` | `Bool` | `true` | Enables platform-native overlay playback controls |
 | `softwareDecodingEnabled` | `Bool` | `true` | Allows software fallback if hardware HEVC/H.264 decoders are saturated |
+
+#### Events
+
+| Event | Payload | Description |
+|---|---|---|
+| `firstFrame(url: String)` | Active media URL | Fired by the native render surface when the first decoded frame is visible. Use it to dismiss a poster or loading overlay. |
 
 ---
 
@@ -199,5 +205,5 @@ Visual display surface hosting the native video render layer.
 
 | Variant | Description |
 |---|---|
-| `invalidUrl` | URL is malformed or does not use HTTP or HTTPS. |
+| `invalidUrl` | URL is malformed or uses an unsupported scheme. HTTP(S), `file://` URLs, and absolute local file paths are supported. |
 | `decodingFailed(message: String)` | Loading or decoding failed; the message contains platform details. |

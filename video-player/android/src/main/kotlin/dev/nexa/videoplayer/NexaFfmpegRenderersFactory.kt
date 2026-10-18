@@ -1,6 +1,7 @@
 package dev.nexa.videoplayer
 
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import androidx.media3.decoder.ffmpeg.ExperimentalFfmpegVideoRenderer
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -17,11 +18,18 @@ internal class NexaFfmpegRenderersFactory(
     init {
         setExtensionRendererMode(
             if (softwareDecodingEnabled) {
-                EXTENSION_RENDERER_MODE_ON
+                if (Build.HARDWARE == "goldfish" || Build.HARDWARE == "ranchu") {
+                    // The emulator's H.264 MediaCodec often advertises support, then fails
+                    // during configure(). Prefer FFmpeg there so the video view remains usable.
+                    EXTENSION_RENDERER_MODE_PREFER
+                } else {
+                    EXTENSION_RENDERER_MODE_ON
+                }
             } else {
                 EXTENSION_RENDERER_MODE_OFF
             },
         )
+        setEnableDecoderFallback(softwareDecodingEnabled)
     }
 
     override fun buildVideoRenderers(

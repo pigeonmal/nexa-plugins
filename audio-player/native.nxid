@@ -13,6 +13,13 @@ error AudioPlayerError {
     playbackFailed(message: String)
 }
 
+struct AudioSource {
+    url: String
+    headers: Map<String, String>
+    loudnessDb: Float64?
+    isHLS: Bool
+}
+
 /// One app-wide background audio session with direct native playback controls.
 native class AudioPlayer {
     init()
@@ -20,17 +27,38 @@ native class AudioPlayer {
     readonly property state: AudioPlaybackState
     readonly property duration: Float64
     readonly property currentTime: Float64
+    readonly property isSleepTimerActive: Bool
+    readonly property sleepTimerRemainingSeconds: Int64
+    readonly property sleepTimerPauseAtTrackEnd: Bool
     property volume: Float64
+    property playbackSpeed: Float64
+    property muted: Bool
 
     /// Replaces the active stream. URLs must use http, https, or file.
-    async fn prepare(url: String) throws AudioPlayerError
+    async fn prepare(source: AudioSource) throws AudioPlayerError
+    /// Applies reusable playback preferences to the app-wide native session.
+    fn configure(skipSilence: Bool, audioNormalization: Bool, pauseOnMute: Bool)
+    /// Opens the Android system audio-effects panel for the active playback session.
+    /// Returns false on platforms without a launchable system equalizer or when no panel is installed.
+    fn openSystemEqualizer() -> Bool
     fn updateMetadata(title: String, artist: String?, album: String?)
     fn play()
     fn pause()
     fn seek(position: Float64)
+    fn startSleepTimer(minutes: Int32)
+    fn startSleepTimerAtTrackEnd()
+    fn clearSleepTimer()
+
+    /// Requests that the app advance its shared playback queue.
+    event skipToNext()
+    /// Requests that the app move backward in its shared playback queue.
+    event skipToPrevious()
 
     event stateChanged(state: AudioPlaybackState)
     event ended()
+    event sleepTimerEnded()
+    /// Updated once per second while playback is active.
+    event progressChanged(position: Float64, duration: Float64)
 
     /// Stops the shared app session and releases this player handle.
     fn dispose()

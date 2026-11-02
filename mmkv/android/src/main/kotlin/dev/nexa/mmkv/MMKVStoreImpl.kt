@@ -452,9 +452,11 @@ public class MMKVStoreImpl : MMKVStoreSpec {
         @Synchronized
         private fun initializeMMKV(): String {
             initializedRootDirectory?.let { return it }
+            val context = NexaRuntimeCore.context().applicationContext
+            val rootDirectory = "${context.filesDir.absolutePath}/mmkv"
             val rootDir = MMKV.initialize(
-                NexaRuntimeCore.context().applicationContext,
-                null,
+                context,
+                rootDirectory,
                 null,
                 MMKVLogLevel.LevelNone,
                 MMKVStoreObserver,

@@ -26,7 +26,7 @@ app MessageReview {
             matches = await extractor.extract("Can we meet tomorrow at 3pm? Email mina@example.com or visit https://nexa.dev.")
             status = "Detected items: \(matches.count)"
         }
-        Column(spacing: 8) {
+        Column(gap: 8) {
             Text(status)
             FastList(matches) { match, index in
                 Text("\(match.kind): \(match.text)")

@@ -1,0 +1,34 @@
+enum SocialProvider {
+    google
+    apple
+}
+
+struct SocialCredential {
+    provider: SocialProvider
+    idToken: String
+    authorizationCode: String
+    nonce: String
+    email: String
+    displayName: String
+    photoURL: String
+}
+
+error SocialSignInError {
+    appClientNotConfigured
+    presentationUnavailable
+    credentialUnavailable
+    providerUnavailable
+    invalidCredential
+    userCanceled
+    signInFailed
+}
+
+/// Starts native sign-in for a supported identity provider and returns server-verifiable credentials.
+native class SocialSignIn {
+    init(googleServerClientID: String, googleIOSClientID: String?)
+
+    async fn signIn(provider: SocialProvider) -> SocialCredential throws SocialSignInError
+
+    /// Clears the local provider session when the provider supports sign-out.
+    async fn signOut(provider: SocialProvider)
+}

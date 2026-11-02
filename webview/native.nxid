@@ -7,7 +7,12 @@ native component BrowserView {
     prop offlineCacheEnabled: Bool = false
     prop allowedMessageOrigins: Array<String>
     prop message: String?
+    /// App-authored script, evaluated only in the main frame on an allowlisted HTTPS origin.
+    prop script: String?
+    /// An explicit HTTPS URL whose cookies may be read. Its exact origin must be allowlisted.
+    prop cookieRequestURL: String?
     event messageReceived(message: String)
     event navigated(url: String)
     event failed(message: String)
+    event cookiesRead(url: String, cookieHeader: String)
 }

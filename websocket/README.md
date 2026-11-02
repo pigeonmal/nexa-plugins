@@ -41,7 +41,7 @@ app EchoChat {
             }
         }
         OnDisappear { socket.dispose() }
-        Column(spacing: 12) {
+        Column(gap: 12) {
             Text(status)
             Text("Last reply: " + received)
             Button("Send message") {

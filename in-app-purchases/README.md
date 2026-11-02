@@ -39,7 +39,7 @@ app InAppPurchasesDemo {
             store.dispose()
         }
 
-        Column(spacing: 12, padding: 20) {
+        Column(gap: 12, padding: 20) {
             Text("In-App Purchases")
             Text(status)
             if hasVerificationPayload {

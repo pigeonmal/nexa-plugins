@@ -1,0 +1,17 @@
+plugin {
+    schema: 2
+    id: "dev.nexa.text-codec"
+    version: "0.1.0"
+    sources {
+        native: "native.nxid"
+    }
+    ios {
+        minVersion: "13.0"
+        sources: ["ios/Sources/**/*.swift"]
+        frameworks: ["Foundation"]
+    }
+    android {
+        minSdk: 21
+        sources: ["android/src/main/kotlin/**/*.kt"]
+    }
+}

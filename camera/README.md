@@ -27,7 +27,7 @@ app CameraDemo {
     state cameraFailure = ""
 
     body {
-        Column(spacing: 12, padding: 16) {
+        Column(gap: 12, padding: 16) {
             Camera.CameraView(
                 facing: Camera.CameraFacing.back,
                 photoRequestId: photoRequestId,

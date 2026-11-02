@@ -10,9 +10,12 @@ public struct BrowserViewImpl: UIViewRepresentable {
     public let offlineCacheEnabled: Bool
     public let allowedMessageOrigins: [String]
     public let message: String?
+    public let script: String?
+    public let cookieRequestURL: String?
     public let onMessageReceived: ((String) -> Void)?
     public let onNavigated: ((String) -> Void)?
     public let onFailed: ((String) -> Void)?
+    public let onCookiesRead: ((String, String) -> Void)?
 
     public init(
         url: String,
@@ -20,18 +23,24 @@ public struct BrowserViewImpl: UIViewRepresentable {
         offlineCacheEnabled: Bool,
         allowedMessageOrigins: [String],
         message: String?,
+        script: String?,
+        cookieRequestURL: String?,
         onMessageReceived: ((String) -> Void)?,
         onNavigated: ((String) -> Void)?,
-        onFailed: ((String) -> Void)?
+        onFailed: ((String) -> Void)?,
+        onCookiesRead: ((String, String) -> Void)?
     ) {
         self.url = url
         self.javaScriptEnabled = javaScriptEnabled
         self.offlineCacheEnabled = offlineCacheEnabled
         self.allowedMessageOrigins = allowedMessageOrigins
         self.message = message
+        self.script = script
+        self.cookieRequestURL = cookieRequestURL
         self.onMessageReceived = onMessageReceived
         self.onNavigated = onNavigated
         self.onFailed = onFailed
+        self.onCookiesRead = onCookiesRead
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -40,9 +49,12 @@ public struct BrowserViewImpl: UIViewRepresentable {
             offlineCacheEnabled: offlineCacheEnabled,
             allowedMessageOrigins: allowedMessageOrigins,
             message: message,
+            script: script,
+            cookieRequestURL: cookieRequestURL,
             onMessageReceived: onMessageReceived,
             onNavigated: onNavigated,
-            onFailed: onFailed
+            onFailed: onFailed,
+            onCookiesRead: onCookiesRead
         )
     }
 
@@ -61,6 +73,8 @@ public struct BrowserViewImpl: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         context.coordinator.load(url, in: webView)
+        context.coordinator.runScript(in: webView)
+        context.coordinator.requestCookies(in: webView)
         return webView
     }
 
@@ -71,9 +85,12 @@ public struct BrowserViewImpl: UIViewRepresentable {
         coordinator.javaScriptEnabled = javaScriptEnabled
         coordinator.offlineCacheEnabled = offlineCacheEnabled
         coordinator.updateMessage(message)
+        coordinator.updateScript(script)
+        coordinator.cookieRequestURL = cookieRequestURL
         coordinator.onMessageReceived = onMessageReceived
         coordinator.onNavigated = onNavigated
         coordinator.onFailed = onFailed
+        coordinator.onCookiesRead = onCookiesRead
         let originsChanged = coordinator.setAllowedMessageOrigins(allowedMessageOrigins)
         coordinator.reportInvalidMessageOriginsIfNeeded()
         if originsChanged {
@@ -86,6 +103,8 @@ public struct BrowserViewImpl: UIViewRepresentable {
         if javaScriptChanged || originsChanged || cachePolicyChanged { coordinator.requestedURL = nil }
         coordinator.load(url, in: webView)
         coordinator.sendCurrentMessage(to: webView)
+        coordinator.runScript(in: webView)
+        coordinator.requestCookies(in: webView)
     }
 
     public static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -102,21 +121,29 @@ public struct BrowserViewImpl: UIViewRepresentable {
         fileprivate var invalidMessageOrigins: [String]?
         fileprivate var reportedInvalidMessageOrigins: [String]?
         fileprivate var message: String?
+        fileprivate var script: String?
+        fileprivate var cookieRequestURL: String?
         fileprivate var onMessageReceived: ((String) -> Void)?
         fileprivate var onNavigated: ((String) -> Void)?
         fileprivate var onFailed: ((String) -> Void)?
+        fileprivate var onCookiesRead: ((String, String) -> Void)?
         fileprivate var requestedURL: String?
         fileprivate var pageLoaded = false
         fileprivate var lastSentMessage: String?
+        fileprivate var lastExecutedScriptURL: String?
+        fileprivate var lastCookieRequestURL: String?
 
         fileprivate init(
             javaScriptEnabled: Bool,
             offlineCacheEnabled: Bool,
             allowedMessageOrigins: [String],
             message: String?,
+            script: String?,
+            cookieRequestURL: String?,
             onMessageReceived: ((String) -> Void)?,
             onNavigated: ((String) -> Void)?,
-            onFailed: ((String) -> Void)?
+            onFailed: ((String) -> Void)?,
+            onCookiesRead: ((String, String) -> Void)?
         ) {
             self.javaScriptEnabled = javaScriptEnabled
             self.offlineCacheEnabled = offlineCacheEnabled
@@ -126,9 +153,12 @@ public struct BrowserViewImpl: UIViewRepresentable {
             self.allowedMessageOrigins = hasInvalidOrigins ? [] : Set(normalizedOrigins)
             self.invalidMessageOrigins = hasInvalidOrigins ? allowedMessageOrigins : nil
             self.message = message
+            self.script = script
+            self.cookieRequestURL = cookieRequestURL
             self.onMessageReceived = onMessageReceived
             self.onNavigated = onNavigated
             self.onFailed = onFailed
+            self.onCookiesRead = onCookiesRead
         }
 
         fileprivate func load(_ address: String, in webView: WKWebView) {
@@ -170,6 +200,56 @@ public struct BrowserViewImpl: UIViewRepresentable {
             webView.evaluateJavaScript(
                 "window.dispatchEvent(new MessageEvent('nexa-message', { data: \(literal) }));"
             )
+        }
+
+        fileprivate func updateScript(_ script: String?) {
+            guard self.script != script else { return }
+            self.script = script
+            lastExecutedScriptURL = nil
+        }
+
+        fileprivate func runScript(in webView: WKWebView) {
+            guard javaScriptEnabled,
+                  pageLoaded,
+                  let script,
+                  let address = webView.url?.absoluteString,
+                  let origin = BrowserViewImpl.normalizedSecurityOrigin(webView.url),
+                  allowedMessageOrigins.contains(origin),
+                  lastExecutedScriptURL != address
+            else { return }
+            lastExecutedScriptURL = address
+            webView.evaluateJavaScript(script) { [weak self] _, error in
+                guard let error else { return }
+                Task { @MainActor [weak self] in
+                    self?.onFailed?("Allowlisted page script failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        fileprivate func requestCookies(in webView: WKWebView) {
+            guard pageLoaded,
+                  let address = cookieRequestURL,
+                  let requestOrigin = BrowserViewImpl.normalizeHttpsOrigin(address),
+                  let currentOrigin = BrowserViewImpl.normalizedSecurityOrigin(webView.url),
+                  requestOrigin == currentOrigin,
+                  allowedMessageOrigins.contains(requestOrigin),
+                  let host = URLComponents(string: address)?.host?.lowercased(),
+                  lastCookieRequestURL != address
+            else { return }
+            lastCookieRequestURL = address
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+                let values = cookies.filter { cookie in
+                    let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                    let path = URLComponents(string: address)?.path ?? "/"
+                    let domainMatches = host == domain || host.hasSuffix(".\(domain)")
+                    let pathMatches = path.hasPrefix(cookie.path)
+                    return domainMatches && pathMatches
+                }.map { "\($0.name)=\($0.value)" }
+                let header = values.joined(separator: "; ")
+                Task { @MainActor [weak self] in
+                    self?.onCookiesRead?(address, header)
+                }
+            }
         }
 
         public func userContentController(
@@ -266,6 +346,7 @@ public struct BrowserViewImpl: UIViewRepresentable {
         public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             pageLoaded = false
             lastSentMessage = nil
+            lastExecutedScriptURL = nil
         }
 
         public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -274,6 +355,8 @@ public struct BrowserViewImpl: UIViewRepresentable {
                 onNavigated?(address)
             }
             sendCurrentMessage(to: webView)
+            runScript(in: webView)
+            requestCookies(in: webView)
         }
 
         public func webView(

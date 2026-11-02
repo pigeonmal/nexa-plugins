@@ -366,19 +366,30 @@ public class DatabaseImpl(
             } else {
                 rawContext
             }
-            val file = context.getDatabasePath("$name.sqlite3")
+            val nexaFile = context.getDatabasePath("$name.sqlite3")
+            // React Native OP-SQLite stores the requested name without Nexa's
+            // suffix. Reuse that file for the one-time user-data import.
+            val sourceFile = context.getDatabasePath(name)
+            val openingSourceDatabase = !nexaFile.isFile && sourceFile.isFile
+            val file = when {
+                nexaFile.isFile -> nexaFile
+                sourceFile.isFile -> sourceFile
+                else -> nexaFile
+            }
             file.parentFile?.let { parent ->
                 if (!parent.exists() && !parent.mkdirs() && !parent.isDirectory) {
                     throw IllegalStateException("Could not create the app database directory")
                 }
             }
             PlatformSQLiteDatabase.openOrCreateDatabase(file, null).apply {
-                enableWriteAheadLogging()
-                setForeignKeyConstraintsEnabled(true)
-                execSQL("CREATE TABLE IF NOT EXISTS _nexa_table_versions (table_name TEXT PRIMARY KEY, version INTEGER NOT NULL)")
-                rawQuery("SELECT table_name, version FROM _nexa_table_versions", null).use { cursor ->
-                    while (cursor.moveToNext()) {
-                        knownTableVersions[cursor.getString(0)] = cursor.getLong(1)
+                if (!openingSourceDatabase) {
+                    enableWriteAheadLogging()
+                    setForeignKeyConstraintsEnabled(true)
+                    execSQL("CREATE TABLE IF NOT EXISTS _nexa_table_versions (table_name TEXT PRIMARY KEY, version INTEGER NOT NULL)")
+                    rawQuery("SELECT table_name, version FROM _nexa_table_versions", null).use { cursor ->
+                        while (cursor.moveToNext()) {
+                            knownTableVersions[cursor.getString(0)] = cursor.getLong(1)
+                        }
                     }
                 }
                 rawQuery("PRAGMA data_version", null).use { cursor ->

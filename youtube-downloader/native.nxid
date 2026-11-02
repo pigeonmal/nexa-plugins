@@ -1,0 +1,103 @@
+enum YoutubeAudioQuality {
+    auto
+    low
+    high
+}
+
+struct YoutubeExtractStreamOptions {
+    videoID: String
+    audioQuality: YoutubeAudioQuality
+    playlistID: String?
+    videoQuality: Int32?
+    cookie: String?
+    visitorData: String?
+    authenticatedOnly: Bool
+    clientName: String?
+}
+
+struct YoutubeStreamFormat {
+    itag: Int32
+    mimeType: String
+    bitrate: Int64
+    width: Int32?
+    height: Int32?
+    contentLength: Int64?
+    quality: String
+    fps: Int32?
+    qualityLabel: String?
+    audioSampleRate: Int32?
+    audioChannels: Int32?
+    loudnessDb: Float64?
+}
+
+struct YoutubeStreamPlayback {
+    format: YoutubeStreamFormat
+    streamURL: String
+    requestHeaders: Map<String, String>
+    rangeChunkSizeBytes: Int64
+    isHLS: Bool
+    isSABR: Bool
+    sabrUstreamerConfig: String?
+}
+
+struct YoutubeAudioConfig {
+    loudnessDb: Float64?
+    perceptualLoudnessDb: Float64?
+}
+
+struct YoutubeVideoDetails {
+    videoID: String
+    title: String?
+    author: String?
+    channelID: String
+    lengthSeconds: String
+    musicVideoType: String?
+    viewCount: String?
+}
+
+struct YoutubePlaybackTracking {
+    videostatsPlaybackURL: String?
+    videostatsWatchtimeURL: String?
+    atrURL: String?
+}
+
+struct YoutubePlaybackData {
+    audioConfig: YoutubeAudioConfig?
+    videoDetails: YoutubeVideoDetails?
+    playbackTracking: YoutubePlaybackTracking?
+    streamExpiresInSeconds: Int32
+    audioStream: YoutubeStreamPlayback
+    videoStream: YoutubeStreamPlayback?
+    clientName: String
+    extractionDurationMs: Float64
+    poTokenDurationMs: Float64?
+    sabrStreamingURL: String?
+}
+
+error YoutubeDownloaderError {
+    invalidVideoID
+    cookieRequired
+    noPlayableAudio(clientName: String)
+    requestFailed(statusCode: Int32)
+    invalidResponse(message: String)
+    tokenUnavailable(message: String)
+}
+
+/// Resolves direct YouTube streams and the headers/range contract they require.
+native class YoutubeDownloader {
+    init()
+
+    /// Uses anonymous client profiles first unless authenticated-only is requested.
+    async fn extractYoutubeStream(options: YoutubeExtractStreamOptions) -> YoutubePlaybackData throws YoutubeDownloaderError
+
+    /// Returns a visitor-bound web PoToken when the selected client requires one.
+    async fn generatePoToken(videoID: String, cookie: String?, visitorData: String?) -> String throws YoutubeDownloaderError
+
+    /// Temporarily avoids a client that returned an unusable stream for this video.
+    fn reportPlaybackFailure(videoID: String, clientName: String, cookie: String?, visitorData: String?)
+
+    /// Removes cached stream results, optionally for one video ID.
+    fn clearCache(videoID: String?)
+
+    fn dispose()
+}

@@ -24,7 +24,7 @@ app PrivacyLinks {
     state openTask: TaskHandle? = null
 
     body {
-        Column(spacing: 12) {
+        Column(gap: 12) {
             Text(status)
             Button("Open privacy policy") {
                 Task.launch(handle: openTask, executor: TaskExecutor.Main) {

@@ -38,7 +38,7 @@ screen Chat {
         socket.dispose()
     }
 
-    Column(spacing: 12) {
+    Column(gap: 12) {
         Text(connection)
         Text(received)
         Text(failure)

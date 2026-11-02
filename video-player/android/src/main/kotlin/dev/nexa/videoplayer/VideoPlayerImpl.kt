@@ -28,7 +28,6 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cronet.CronetDataSource
-import androidx.media3.datasource.cronet.CronetUtil
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -46,14 +45,12 @@ import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
-import org.chromium.net.CronetEngine
+import dev.nexa.core.NexaNetwork
 import java.io.File
 import java.net.URI
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import java.util.concurrent.CancellationException
-import java.util.concurrent.Executor
-import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -281,20 +278,17 @@ public class VideoPlayerImpl : VideoPlayerSpec {
     }
 }
 
-/** One embedded Cronet engine and response executor are shared by all players. */
+/** Video streams reuse Nexa's app-wide Cronet engine and callback executor. */
 private object VideoPlayerCronetRuntime {
     private const val MAX_DISK_CACHE_BYTES = 256L * 1024L * 1024L
-    private val responseExecutor: Executor = Executors.newSingleThreadExecutor { command ->
-        Thread(command, "NexaVideoCronet").apply { isDaemon = true }
-    }
-
-    @Volatile
-    private var sharedEngine: CronetEngine? = null
     @Volatile
     private var sharedCache: SimpleCache? = null
 
     fun dataSourceFactory(context: Context): DataSource.Factory {
-        val cronetFactory = CronetDataSource.Factory(engine(context), responseExecutor)
+        val cronetFactory = CronetDataSource.Factory(
+            NexaNetwork.cronetEngine(context),
+            NexaNetwork.cronetExecutor(),
+        )
         return DefaultDataSource.Factory(context.applicationContext, cronetFactory)
     }
 
@@ -311,17 +305,6 @@ private object VideoPlayerCronetRuntime {
                 LeastRecentlyUsedCacheEvictor(MAX_DISK_CACHE_BYTES),
                 StandaloneDatabaseProvider(context.applicationContext),
             ).also { sharedCache = it }
-        }
-    }
-
-    private fun engine(context: Context): CronetEngine {
-        sharedEngine?.let { return it }
-        return synchronized(this) {
-            sharedEngine ?: requireNotNull(
-                CronetUtil.buildCronetEngine(context.applicationContext, "NexaVideoPlayer", false),
-            ) {
-                "Embedded Cronet is unavailable; ensure cronet-embedded is packaged in the Android app"
-            }.also { sharedEngine = it }
         }
     }
 }

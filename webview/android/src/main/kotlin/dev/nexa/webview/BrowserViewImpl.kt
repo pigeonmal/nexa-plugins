@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -25,14 +26,20 @@ public fun BrowserViewImpl(
     offlineCacheEnabled: Boolean,
     allowedMessageOrigins: List<String>,
     message: String?,
+    script: String?,
+    cookieRequestURL: String?,
     onMessageReceived: ((String) -> Unit)? = null,
     onNavigated: ((String) -> Unit)? = null,
     onFailed: ((String) -> Unit)? = null,
+    onCookiesRead: ((String, String) -> Unit)? = null,
 ) {
     val latestMessageReceived = rememberUpdatedState(onMessageReceived)
     val latestNavigated = rememberUpdatedState(onNavigated)
     val latestFailed = rememberUpdatedState(onFailed)
+    val latestCookiesRead = rememberUpdatedState(onCookiesRead)
     val latestMessage = rememberUpdatedState(message)
+    val latestScript = rememberUpdatedState(script)
+    val latestCookieRequestURL = rememberUpdatedState(cookieRequestURL)
     val latestJavaScriptEnabled = rememberUpdatedState(javaScriptEnabled)
 
     AndroidView(
@@ -42,6 +49,8 @@ public fun BrowserViewImpl(
                 this.javascriptEnabled = javaScriptEnabled
                 this.offlineCacheEnabled = offlineCacheEnabled
                 lastObservedMessage = message
+                lastObservedScript = script
+                this.cookieRequestURL = cookieRequestURL
                 settings.javaScriptEnabled = javaScriptEnabled
                 settings.cacheMode = if (offlineCacheEnabled) {
                     WebSettings.LOAD_CACHE_ELSE_NETWORK
@@ -74,6 +83,8 @@ public fun BrowserViewImpl(
                         (view as? NexaBrowserView)?.apply {
                             pageLoaded = false
                             lastSentMessage = null
+                            lastExecutedScriptURL = null
+                            lastCookieRequestURL = null
                         }
                     }
 
@@ -86,6 +97,8 @@ public fun BrowserViewImpl(
                             latestMessage.value,
                             latestJavaScriptEnabled.value,
                         )
+                        dispatchScript(browserView, latestScript.value, latestJavaScriptEnabled.value)
+                        requestCookies(browserView, latestCookieRequestURL.value, latestCookiesRead.value)
                     }
 
                     override fun onReceivedError(
@@ -113,10 +126,14 @@ public fun BrowserViewImpl(
             val jsChanged = view.javascriptEnabled != javaScriptEnabled
             val cachePolicyChanged = view.offlineCacheEnabled != offlineCacheEnabled
             val messageChanged = view.lastObservedMessage != message
+            val scriptChanged = view.lastObservedScript != script
             view.javascriptEnabled = javaScriptEnabled
             view.offlineCacheEnabled = offlineCacheEnabled
             view.lastObservedMessage = message
+            view.lastObservedScript = script
+            view.cookieRequestURL = cookieRequestURL
             if (messageChanged) view.lastSentMessage = null
+            if (scriptChanged) view.lastExecutedScriptURL = null
             view.settings.javaScriptEnabled = javaScriptEnabled
             view.settings.cacheMode = if (offlineCacheEnabled) {
                 WebSettings.LOAD_CACHE_ELSE_NETWORK
@@ -137,6 +154,8 @@ public fun BrowserViewImpl(
             }
 
             dispatchMessage(view, latestMessage.value, javaScriptEnabled)
+            dispatchScript(view, latestScript.value, javaScriptEnabled)
+            requestCookies(view, latestCookieRequestURL.value, latestCookiesRead.value)
         },
         onRelease = { view ->
             if (view.messageListenerInstalled &&
@@ -158,6 +177,10 @@ private class NexaBrowserView(context: Context) : WebView(context) {
     var pageLoaded = false
     var lastSentMessage: String? = null
     var lastObservedMessage: String? = null
+    var lastObservedScript: String? = null
+    var lastExecutedScriptURL: String? = null
+    var cookieRequestURL: String? = null
+    var lastCookieRequestURL: String? = null
     var messageOrigins: Set<String> = emptySet()
     var messageListenerInstalled = false
     var lastReportedInvalidMessageOrigins: List<String>? = null
@@ -339,6 +362,32 @@ private fun dispatchMessage(view: NexaBrowserView, message: String?, enabled: Bo
         "window.dispatchEvent(new MessageEvent('nexa-message', { data: $quotedMessage }));",
         null,
     )
+}
+
+private fun dispatchScript(view: NexaBrowserView, script: String?, enabled: Boolean) {
+    val currentUrl = view.url ?: return
+    val currentOrigin = httpsOriginOf(currentUrl)
+    if (!enabled || !view.pageLoaded || script.isNullOrBlank() ||
+        currentOrigin !in view.messageOrigins || view.lastExecutedScriptURL == currentUrl
+    ) return
+    view.lastExecutedScriptURL = currentUrl
+    view.evaluateJavascript(script, null)
+}
+
+private fun requestCookies(
+    view: NexaBrowserView,
+    address: String?,
+    onCookiesRead: ((String, String) -> Unit)?,
+) {
+    if (address.isNullOrBlank() || onCookiesRead == null || !view.pageLoaded) return
+    val requestedOrigin = normalizeHttpsOrigin(address) ?: return
+    val currentOrigin = view.url?.let(::httpsOriginOf) ?: return
+    if (requestedOrigin !in view.messageOrigins || requestedOrigin != currentOrigin ||
+        view.lastCookieRequestURL == address
+    ) return
+    view.lastCookieRequestURL = address
+    val cookieHeader = CookieManager.getInstance().getCookie(address).orEmpty()
+    view.post { onCookiesRead(address, cookieHeader) }
 }
 
 private const val MESSAGE_BRIDGE_NAME = "Nexa"

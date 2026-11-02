@@ -1,0 +1,7 @@
+/// Cross-platform decoding helpers for text payloads.
+native class TextCodec {
+    init()
+
+    /// Decodes Base64 bytes as UTF-8 text, returning null for malformed input.
+    fn decodeBase64Utf8(encoded: String) -> String?
+}

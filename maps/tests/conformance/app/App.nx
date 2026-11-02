@@ -25,7 +25,7 @@ app MapsConformance {
                 Log.info(message: "MAP_PIN_SELECTED:\(id)")
             }
 
-            Column(spacing: 4, padding: 16) {
+            Column(gap: 4, padding: 16) {
                 Spacer()
                 Row(padding: 10, background: "#CC111111") {
                     Text(

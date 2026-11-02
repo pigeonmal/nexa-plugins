@@ -27,7 +27,7 @@ app ReadingPreferences {
     state dailyGoal: Int32 = store.getInt32("daily-goal") ?? 20
 
     body {
-        Column(spacing: 12) {
+        Column(gap: 12) {
             Text("Theme: \(theme)")
             Text("Daily reading goal: \(dailyGoal) minutes")
             Button("Use dark theme") {

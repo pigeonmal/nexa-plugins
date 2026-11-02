@@ -1,0 +1,24 @@
+plugin "../../../" as ShareSheet
+
+app ShareSheetDemo {
+    let share = ShareSheet.ShareSheet()
+    state status: String = "Ready to share a Mazica playlist invite."
+
+    body {
+        Column(gap: 12, padding: 20) {
+            Text(status)
+            Button("Share playlist link") {
+                Task.launch(executor: TaskExecutor.Main) {
+                    try {
+                        await share.shareLink("mazica://playlist/join/demo-token", "Mazica playlist")
+                        status = "The share sheet opened."
+                    } catch {
+                        case ShareSheet.ShareSheetError.presentationUnavailable {
+                            status = "The share sheet is unavailable right now."
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

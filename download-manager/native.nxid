@@ -1,0 +1,55 @@
+enum DownloadState {
+    queued
+    downloading
+    completed
+    failed
+    cancelled
+}
+
+struct DownloadSnapshot {
+    id: String
+    state: DownloadState
+    receivedBytes: Int64
+    expectedBytes: Int64
+    localPath: String
+    error: String
+}
+
+error DownloadManagerError {
+    invalidIdentifier
+    invalidURL
+    destinationUnavailable
+    downloadFailed(message: String)
+}
+
+/// Owns cancellable, resumable platform downloads in the app's private music directory.
+native class DownloadManager {
+    init()
+
+    /// Starts a download or resumes observation of the task with this identifier.
+    async fn start(id: String, url: String, fileName: String, headers: Map<String, String>) -> DownloadSnapshot throws DownloadManagerError
+
+    /// Downloads a finite HLS audio playlist and its referenced resources into a local package.
+    async fn startHls(id: String, url: String, packageName: String, headers: Map<String, String>, expectedBytes: Int64?) -> DownloadSnapshot throws DownloadManagerError
+
+    /// Returns the last known state, including after the app process has restarted.
+    async fn status(id: String) -> DownloadSnapshot? throws DownloadManagerError
+
+    /// Returns a completed local audio path when the file still exists.
+    async fn completedPath(id: String) -> String? throws DownloadManagerError
+
+    /// Reuses completed Mazica Android downloads whose filenames use track IDs.
+    async fn adoptExistingDownloads(ids: Array<String>) throws DownloadManagerError
+
+    /// Cancels an active transfer and removes its partial file.
+    fn cancel(id: String)
+
+    /// Cancels an active transfer, removes its task record, and deletes its completed file.
+    async fn remove(id: String) -> Bool throws DownloadManagerError
+
+    event progress(id: String, receivedBytes: Int64, expectedBytes: Int64)
+    event completed(snapshot: DownloadSnapshot)
+    event failed(id: String, message: String)
+
+    fn dispose()
+}

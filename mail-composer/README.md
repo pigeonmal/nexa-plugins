@@ -27,7 +27,7 @@ app FeedbackComposer {
                 status = "Mail flow completed: \(result)"
             }
         }
-        Column(spacing: 12) {
+        Column(gap: 12) {
             Text(status)
             Button("Write feedback email") {
                 Task.launch(handle: sendTask, executor: TaskExecutor.Main) {

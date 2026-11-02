@@ -5,7 +5,7 @@
 
 Native video playback surface with hardware acceleration, forward stream preloading, HLS/DASH streaming, and custom controls.
 
-Backed by Apple `AVPlayer` + `AVPlayerLayer` on iOS and AndroidX `Media3` (ExoPlayer) with optional Google Cronet networking on Android.
+Backed by Apple `AVPlayer` + `AVPlayerLayer` on iOS and AndroidX `Media3` (ExoPlayer) on Android. Android video streams reuse Nexa's app-wide Cronet engine and callback executor.
 
 ---
 

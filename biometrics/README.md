@@ -21,7 +21,7 @@ app BiometricsDemo {
     state failed = false
 
     body {
-        Column(spacing: 12, padding: 20) {
+        Column(gap: 12, padding: 20) {
             Text("Biometric authentication")
             Biometrics.BiometricButton(
                 title: "Authenticate",

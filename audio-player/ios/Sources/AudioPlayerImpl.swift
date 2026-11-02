@@ -8,10 +8,27 @@ public final class AudioPlayerImpl: AudioPlayerSpec {
 
     public var onStateChanged: ((AudioPlaybackState) -> Void)?
     public var onEnded: (() -> Void)?
+    public var onSleepTimerEnded: (() -> Void)?
+    public var onSkipToNext: (() -> Void)?
+    public var onSkipToPrevious: (() -> Void)?
+    public var onProgressChanged: ((Double, Double) -> Void)?
 
     public var state: AudioPlaybackState { session.state }
     public var duration: Double { session.duration }
     public var currentTime: Double { session.currentTime }
+    public var isSleepTimerActive: Bool { session.isSleepTimerActive }
+    public var sleepTimerRemainingSeconds: Int64 { session.sleepTimerRemainingSeconds }
+    public var sleepTimerPauseAtTrackEnd: Bool { session.sleepTimerPauseAtTrackEnd }
+
+    public var playbackSpeed: Double {
+        get { session.playbackSpeed }
+        set { session.setPlaybackSpeed(newValue) }
+    }
+
+    public var muted: Bool {
+        get { session.muted }
+        set { session.setMuted(newValue) }
+    }
 
     public var volume: Double {
         get { session.volume }
@@ -22,11 +39,21 @@ public final class AudioPlayerImpl: AudioPlayerSpec {
         session.register(self)
     }
 
-    public func prepare(_ url: String) async throws(AudioPlayerError) {
+    public func prepare(_ source: AudioSource) async throws(AudioPlayerError) {
         guard !disposed else {
             throw .playbackFailed(message: "AudioPlayer is disposed")
         }
-        try await session.prepare(url)
+        try await session.prepare(source)
+    }
+
+    public func configure(_ skipSilence: Bool, _ audioNormalization: Bool, _ pauseOnMute: Bool) {
+        guard !disposed else { return }
+        session.configure(skipSilence: skipSilence, audioNormalization: audioNormalization, pauseOnMute: pauseOnMute)
+    }
+
+    public func openSystemEqualizer() -> Bool {
+        guard !disposed else { return false }
+        return session.openSystemEqualizer()
     }
 
     public func updateMetadata(_ title: String, _ artist: String?, _ album: String?) {
@@ -49,12 +76,31 @@ public final class AudioPlayerImpl: AudioPlayerSpec {
         session.seek(position)
     }
 
+    public func startSleepTimer(_ minutes: Int32) {
+        guard !disposed else { return }
+        session.startSleepTimer(minutes: minutes)
+    }
+
+    public func startSleepTimerAtTrackEnd() {
+        guard !disposed else { return }
+        session.startSleepTimerAtTrackEnd()
+    }
+
+    public func clearSleepTimer() {
+        guard !disposed else { return }
+        session.clearSleepTimer()
+    }
+
     public func dispose() {
         guard !disposed else { return }
         disposed = true
         session.unregister(self)
         onStateChanged = nil
         onEnded = nil
+        onSleepTimerEnded = nil
+        onSkipToNext = nil
+        onSkipToPrevious = nil
+        onProgressChanged = nil
     }
 
     fileprivate func playbackStateDidChange(_ state: AudioPlaybackState) {
@@ -63,6 +109,22 @@ public final class AudioPlayerImpl: AudioPlayerSpec {
 
     fileprivate func playbackDidEnd() {
         onEnded?()
+    }
+
+    fileprivate func sleepTimerDidEnd() {
+        onSleepTimerEnded?()
+    }
+
+    fileprivate func skipToNextDidRequest() {
+        onSkipToNext?()
+    }
+
+    fileprivate func skipToPreviousDidRequest() {
+        onSkipToPrevious?()
+    }
+
+    fileprivate func playbackProgressDidChange(position: Double, duration: Double) {
+        onProgressChanged?(position, duration)
     }
 }
 
@@ -81,14 +143,33 @@ private final class AudioPlaybackSession {
     private let commandCenter = MPRemoteCommandCenter.shared()
     private var handles: [ObjectIdentifier: WeakPlayer] = [:]
     private var player: AVPlayer?
+    private var pendingAsset: AVURLAsset?
+    private var prepareRevision: UInt64 = 0
+    private var resourceLoader: AudioURLSessionResourceLoader?
     private var endObserver: NSObjectProtocol?
     private var timeObserver: Any?
     private var commandTargets: [(MPRemoteCommand, Any)] = []
     private var metadata: (title: String, artist: String?, album: String?)?
+    private var currentLoudnessDb: Double?
+    private var sleepTimer: Timer?
+    private var sleepTimerDeadlineUptime: TimeInterval?
+    private var outputVolumeObservation: NSKeyValueObservation?
+    private var pausedByDeviceMute = false
+    private(set) var sleepTimerPauseAtTrackEnd = false
+    private(set) var playbackSpeed = 1.0
+    private(set) var muted = false
+    private var audioNormalizationEnabled = true
+    private var pauseOnMuteEnabled = true
 
     private(set) var state: AudioPlaybackState = .idle
     private(set) var duration: Double = 0
     private(set) var volume: Double = 1
+
+    var isSleepTimerActive: Bool { sleepTimer != nil || sleepTimerPauseAtTrackEnd }
+    var sleepTimerRemainingSeconds: Int64 {
+        guard let sleepTimerDeadlineUptime else { return 0 }
+        return max(0, Int64((sleepTimerDeadlineUptime - ProcessInfo.processInfo.systemUptime).rounded(.up)))
+    }
 
     var currentTime: Double {
         guard let player else { return 0 }
@@ -108,7 +189,8 @@ private final class AudioPlaybackSession {
         }
     }
 
-    func prepare(_ url: String) async throws(AudioPlayerError) {
+    func prepare(_ source: AudioSource) async throws(AudioPlayerError) {
+        let url = source.url
         guard let components = URLComponents(string: url),
               let scheme = components.scheme?.lowercased(),
               ["http", "https", "file"].contains(scheme),
@@ -118,24 +200,68 @@ private final class AudioPlaybackSession {
             throw .invalidUrl
         }
 
+        prepareRevision &+= 1
+        let revision = prepareRevision
+        pendingAsset?.cancelLoading()
+        pendingAsset = nil
+        resourceLoader?.cancelAll()
+        resourceLoader = nil
+        if let player {
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+        }
+        observeEnd(of: nil)
+        duration = 0
+        currentLoudnessDb = source.loudnessDb
         setState(.preparing)
-        let asset = AVURLAsset(url: parsedURL)
+        let asset: AVURLAsset
+        var requestLoader: AudioURLSessionResourceLoader?
+        if scheme == "http" || scheme == "https" {
+            let loader = AudioURLSessionResourceLoader(headers: source.headers, isHLS: source.isHLS)
+            guard let proxiedURL = loader.proxyURL(for: parsedURL) else {
+                setState(.failed)
+                throw .invalidUrl
+            }
+            let remoteAsset = AVURLAsset(url: proxiedURL)
+            remoteAsset.resourceLoader.setDelegate(loader, queue: .main)
+            resourceLoader = loader
+            requestLoader = loader
+            asset = remoteAsset
+        } else {
+            asset = AVURLAsset(url: parsedURL)
+        }
+        pendingAsset = asset
         do {
             guard try await asset.load(.isPlayable) else {
+                guard revision == prepareRevision else { return }
                 setState(.failed)
                 throw AudioPlayerError.playbackFailed(message: "The media is not playable")
             }
             let loadedDuration = try await asset.load(.duration)
+            let tracks = try await asset.load(.tracks)
+            guard revision == prepareRevision else {
+                requestLoader?.cancelAll()
+                return
+            }
             let activePlayer = ensurePlayer()
-            activePlayer.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+            let item = AVPlayerItem(asset: asset)
+            item.audioMix = makeAudioMix(tracks: tracks, loudnessDb: source.loudnessDb)
+            activePlayer.replaceCurrentItem(with: item)
             duration = loadedDuration.seconds.isFinite ? max(0, loadedDuration.seconds) : 0
+            pendingAsset = nil
             observeEnd(of: activePlayer.currentItem)
             updateNowPlaying()
             setState(.ready)
         } catch let error as AudioPlayerError {
+            guard revision == prepareRevision else { return }
+            pendingAsset = nil
+            requestLoader?.cancelAll()
             setState(.failed)
             throw error
         } catch {
+            guard revision == prepareRevision else { return }
+            pendingAsset = nil
+            requestLoader?.cancelAll()
             setState(.failed)
             throw .playbackFailed(message: error.localizedDescription)
         }
@@ -149,7 +275,48 @@ private final class AudioPlaybackSession {
     func setVolume(_ value: Double) {
         let clamped = value.isFinite ? min(max(value, 0), 1) : 1
         volume = clamped
-        player?.volume = Float(clamped)
+        player?.volume = muted ? 0 : Float(clamped)
+    }
+
+    func setMuted(_ value: Bool) {
+        muted = value
+        player?.volume = value ? 0 : Float(volume)
+    }
+
+    func setPlaybackSpeed(_ value: Double) {
+        let speed = value.isFinite ? min(max(value, 0.25), 3.0) : 1.0
+        playbackSpeed = speed
+        if state == .playing {
+            player?.rate = Float(speed)
+            updateNowPlaying()
+        }
+    }
+
+    func configure(skipSilence: Bool, audioNormalization: Bool, pauseOnMute: Bool) {
+        // AVPlayer has no silence-skipping control; ExoPlayer applies this option natively on Android.
+        _ = skipSilence
+        audioNormalizationEnabled = audioNormalization
+        pauseOnMuteEnabled = pauseOnMute
+        if !pauseOnMute { pausedByDeviceMute = false }
+        if let currentItem = player?.currentItem, let currentLoudnessDb {
+            Task { @MainActor [weak self, weak currentItem] in
+                guard let self, let currentItem else { return }
+                do {
+                    let tracks = try await currentItem.asset.load(.tracks)
+                    guard self.player?.currentItem === currentItem else { return }
+                    currentItem.audioMix = self.makeAudioMix(tracks: tracks, loudnessDb: currentLoudnessDb)
+                } catch {
+                    currentItem.audioMix = nil
+                }
+            }
+        } else if let currentItem = player?.currentItem {
+            currentItem.audioMix = nil
+        }
+    }
+
+    func openSystemEqualizer() -> Bool {
+        // iOS has no public system equalizer panel that third-party apps can launch.
+        return false
     }
 
     func play() {
@@ -158,8 +325,9 @@ private final class AudioPlaybackSession {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .default)
             try audioSession.setActive(true)
-            player.play()
+            player.playImmediately(atRate: Float(playbackSpeed))
             setState(.playing)
+            handleDeviceVolumeChange(AVAudioSession.sharedInstance().outputVolume)
             updateNowPlaying()
         } catch {
             NSLog("Nexa AudioPlayer could not activate playback: %@", error.localizedDescription)
@@ -187,19 +355,61 @@ private final class AudioPlaybackSession {
         }
     }
 
+    func startSleepTimer(minutes: Int32) {
+        clearSleepTimer()
+        guard minutes > 0 else { return }
+        let duration = TimeInterval(minutes) * 60
+        sleepTimerDeadlineUptime = ProcessInfo.processInfo.systemUptime + duration
+        sleepTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.finishSleepTimer(pausePlayback: true) }
+        }
+    }
+
+    func startSleepTimerAtTrackEnd() {
+        clearSleepTimer()
+        sleepTimerPauseAtTrackEnd = true
+    }
+
+    func clearSleepTimer() {
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        sleepTimerDeadlineUptime = nil
+        sleepTimerPauseAtTrackEnd = false
+    }
+
+    private func finishSleepTimer(pausePlayback: Bool) {
+        if pausePlayback { pause() }
+        clearSleepTimer()
+        forEachHandle { $0.sleepTimerDidEnd() }
+    }
+
     private func ensurePlayer() -> AVPlayer {
         if let player { return player }
         let player = AVPlayer()
         player.actionAtItemEnd = .pause
-        player.volume = Float(volume)
+        player.volume = muted ? 0 : Float(volume)
         self.player = player
+
+        outputVolumeObservation = AVAudioSession.sharedInstance().observe(
+            \.outputVolume,
+            options: [.new]
+        ) { [weak self] session, _ in
+            let outputVolume = session.outputVolume
+            Task { @MainActor [weak self] in
+                self?.handleDeviceVolumeChange(outputVolume)
+            }
+        }
 
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 1, preferredTimescale: 1_000),
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.updateNowPlaying()
+                guard let self else { return }
+                self.updateNowPlaying()
+                self.forEachHandle {
+                    $0.playbackProgressDidChange(position: self.currentTime, duration: self.duration)
+                }
             }
         }
         installRemoteCommands()
@@ -221,7 +431,11 @@ private final class AudioPlaybackSession {
                 guard let self else { return }
                 self.setState(.ended)
                 self.updateNowPlaying()
-                self.forEachHandle { $0.playbackDidEnd() }
+                if self.sleepTimerPauseAtTrackEnd {
+                    self.finishSleepTimer(pausePlayback: false)
+                } else {
+                    self.forEachHandle { $0.playbackDidEnd() }
+                }
             }
         }
     }
@@ -242,14 +456,32 @@ private final class AudioPlaybackSession {
             Task { @MainActor [weak self] in self?.seek(event.positionTime) }
             return .success
         }
+        let next = commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pause()
+                self?.forEachHandle { $0.skipToNextDidRequest() }
+            }
+            return .success
+        }
+        let previous = commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pause()
+                self?.forEachHandle { $0.skipToPreviousDidRequest() }
+            }
+            return .success
+        }
         commandTargets = [
             (commandCenter.playCommand, play),
             (commandCenter.pauseCommand, pause),
             (commandCenter.changePlaybackPositionCommand, seek),
+            (commandCenter.nextTrackCommand, next),
+            (commandCenter.previousTrackCommand, previous),
         ]
         commandCenter.playCommand.isEnabled = true
         commandCenter.pauseCommand.isEnabled = true
         commandCenter.changePlaybackPositionCommand.isEnabled = true
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.isEnabled = true
     }
 
     private func setState(_ next: AudioPlaybackState) {
@@ -258,11 +490,39 @@ private final class AudioPlaybackSession {
         forEachHandle { $0.playbackStateDidChange(next) }
     }
 
+    private func handleDeviceVolumeChange(_ outputVolume: Float) {
+        guard pauseOnMuteEnabled, let player else { return }
+        if outputVolume <= 0, player.rate > 0 {
+            pausedByDeviceMute = true
+            pause()
+        } else if outputVolume > 0, pausedByDeviceMute {
+            pausedByDeviceMute = false
+            play()
+        }
+    }
+
+    private func makeAudioMix(tracks: [AVAssetTrack], loudnessDb: Double?) -> AVAudioMix? {
+        guard audioNormalizationEnabled, let loudnessDb, loudnessDb.isFinite, loudnessDb != 0 else { return nil }
+        let gainMillibels = Int(min(max(-loudnessDb * 100.0, -1_500.0), 300.0).rounded())
+        let linearGain = Float(pow(10.0, (Double(gainMillibels) / 100.0) / 20.0))
+        let inputParameters = tracks
+            .filter { $0.mediaType == .audio }
+            .map { track in
+                let parameters = AVMutableAudioMixInputParameters(track: track)
+                parameters.setVolume(linearGain, at: .zero)
+                return parameters
+            }
+        guard !inputParameters.isEmpty else { return nil }
+        let audioMix = AVMutableAudioMix()
+        audioMix.inputParameters = inputParameters
+        return audioMix
+    }
+
     private func updateNowPlaying() {
         guard player != nil else { return }
         var info: [String: Any] = [
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
-            MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? playbackSpeed : 0.0,
             MPMediaItemPropertyPlaybackDuration: duration,
         ]
         if let title = metadata?.title {
@@ -301,13 +561,22 @@ private final class AudioPlaybackSession {
             command.removeTarget(target)
         }
         commandTargets.removeAll(keepingCapacity: false)
+        clearSleepTimer()
+        pendingAsset?.cancelLoading()
+        pendingAsset = nil
+        resourceLoader?.cancelAll()
+        resourceLoader = nil
+        outputVolumeObservation = nil
         commandCenter.playCommand.isEnabled = false
         commandCenter.pauseCommand.isEnabled = false
         commandCenter.changePlaybackPositionCommand.isEnabled = false
+        commandCenter.nextTrackCommand.isEnabled = false
+        commandCenter.previousTrackCommand.isEnabled = false
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
         duration = 0
+        currentLoudnessDb = nil
         metadata = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

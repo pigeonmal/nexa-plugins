@@ -1,0 +1,11 @@
+error ShareSheetError {
+    presentationUnavailable
+}
+
+/// Presents text or a link in the native system share sheet.
+native class ShareSheet {
+    init()
+
+    async fn shareText(text: String, subject: String?) throws ShareSheetError
+    async fn shareLink(url: String, title: String?) throws ShareSheetError
+}

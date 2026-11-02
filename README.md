@@ -14,7 +14,7 @@ app VaultUnlock {
     state failed: Bool = false
 
     body {
-        Column(spacing: 12, padding: 20) {
+        Column(gap: 12, padding: 20) {
             Text("Unlock the private vault", fontSize: 22, fontWeight: Bold)
             Biometrics.BiometricButton(
                 title: "Authenticate",

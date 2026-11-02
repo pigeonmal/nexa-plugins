@@ -17,7 +17,12 @@ app AudioPlayerDemo {
             }
             player.updateMetadata("SoundHelix Song 1", "SoundHelix", "AudioPlayer demo")
             try {
-                await player.prepare(trackUrl)
+                await player.prepare(AudioPlayer.AudioSource(
+                    url: trackUrl,
+                    headers: [:],
+                    loudnessDb: null,
+                    isHLS: false
+                ))
                 player.play()
             } catch {
                 case AudioPlayer.AudioPlayerError.invalidUrl {
@@ -28,7 +33,7 @@ app AudioPlayerDemo {
                 }
             }
         }
-        Column(spacing: 12) {
+        Column(gap: 12) {
             Text("AudioPlayer demo")
             if stateChanged {
                 Text("Playback state changed")

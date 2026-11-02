@@ -48,7 +48,7 @@ app SharedTaskList {
             }
         }
         OnDisappear { database.dispose() }
-        Column(spacing: 12, padding: 16) {
+        Column(gap: 12, padding: 16) {
             Text(status)
             if tasks.value.isEmpty {
                 Text("No tasks yet. Add a task to get started.")

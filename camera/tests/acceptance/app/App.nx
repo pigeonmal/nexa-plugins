@@ -5,7 +5,7 @@ app CameraScanAcceptance {
     state cameraFailure = ""
 
     body {
-        Column(spacing: 8, padding: 16) {
+        Column(gap: 8, padding: 16) {
             Camera.CameraView(
                 facing: Camera.CameraFacing.back,
                 barcodeScanningEnabled: true,

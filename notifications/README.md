@@ -43,7 +43,7 @@ app NotificationsDemo {
                 }
             }
         }
-        Column(spacing: 12, padding: 20) {
+        Column(gap: 12, padding: 20) {
             Text(status)
             Button("Request permission") {
                 Task.launch(handle: permissionTask, executor: TaskExecutor.Main) {
